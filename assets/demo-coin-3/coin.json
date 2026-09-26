@@ -1,0 +1,7 @@
+{
+  "name": "Sapling testnet demo coin 3 (no value)",
+  "cluster": "devnet",
+  "mint": "7rk4gxmtuu5dT441WnxDxX7P48f4Xf4Pagob6SdJoJt4",
+  "decimals": 6,
+  "note": "Demo 3 of OrchardZSA twins for Sapling (sapling.cash) coins: issued one-way for each burn of this coin on Solana devnet, each issuance citing its burn, signed by a 2-of-3 threshold issuer key (FROST). Test networks only. No value. The issuer is trusted; check it yourself: https://github.com/saplingcash/zsa"
+}

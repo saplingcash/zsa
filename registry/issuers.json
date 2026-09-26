@@ -18,6 +18,13 @@
       "valid_from": 590,
       "valid_until": null,
       "note": "Test issuer 1 (single key)."
+    },
+    {
+      "issuer": "004649aead129f73eabe82a0155cc38a58e7c96f65b94d17f82820157635eb314a",
+      "network": "qedit-zsa-test",
+      "valid_from": 692,
+      "valid_until": null,
+      "note": "Test issuer 2: a 2-of-3 FROST group key (no single holder)."
     }
   ]
 }

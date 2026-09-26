@@ -17,21 +17,25 @@ The `zsa` command-line tool:
 | `describe <coin-dir>` | Builds a twin's metadata from `coin.json`, and prints its asset identifiers. The metadata is a Cachet v1 bundle and envelope; see [docs/METADATA.md](docs/METADATA.md). |
 | `keygen`, `issuer` | Creates a test issuer key (a BIP-39 phrase), and prints its public issuer key. |
 | `address` | Prints a test wallet's unified address (test network, Orchard receiver): the address a burn memo names. |
-| `serve` | The issuer service: watches Solana for burns of every burn twin and issues each twin once, citing the burn ([RULES.md §5](docs/RULES.md)). |
+| `serve` | The issuer service: watches Solana for burns of every burn twin and issues each twin once, citing the burn ([RULES.md §5](docs/RULES.md)). It holds the issuer key (`--key`), or asks threshold signers (`--group`, `--signers`, `--threshold`). |
+| `signer dkg`, `signer serve` | A threshold signer of a FROST group issuer key: one participant's part of the key generation, and a signing server that checks each issuance on its own before signing ([RULES.md §6](docs/RULES.md)). |
 | `issue <coin-dir>` | Builds and submits an issuance on a ZSA test node, optionally with a burn citation. |
 | `holder balance / send / burn` | The holder's side: a test wallet's balance of a twin, sending it on to a fresh address, and burning part of it on Zcash (ZIP 226). |
 | `inspect <txid>` | Prints what anyone can read from the chain about a transaction, and what stays hidden. |
 | `pages` | Generates a static HTML page per twin (and an index) from an audit run. |
 | `check <coin-dir>` | Re-derives a twin's issuances from public data only: the metadata, the asset id, the transactions, the issuer's signature and the node's supply record. |
 | `audit` | Applies [docs/RULES.md](docs/RULES.md) to every twin in `registry/`, by scanning the chain. |
+| `frost-selftest` | On a **local** ZSA node: issues under a 2-of-3 FROST group key, and checks what the node accepts and refuses. |
 | `local-vectors` | Issues deliberately bad twin issuances on a **local** ZSA node, runs `audit` on a throwaway registry, and checks each verdict. It refuses any node that is not on localhost. |
 
 The published twins are in `assets/`, and the listed issuer keys are in `registry/`.
 
 ## Trust model
 
-- **The issuer is trusted.** It holds the issuance key, so it could issue without a burn, or refuse to
-  issue.
+- **The issuer is trusted.** Whoever can sign for the issuer key could issue without a burn, or refuse
+  to issue. With a single key, that is its holder. With a threshold issuer, it takes `t` of the `n`
+  signers: no one holds the whole key.
+  Demo coin 3's issuer is a 2-of-3 FROST group key.
 - **`check` and `audit` make that visible.** Anyone can run them, with no key, no account and no
   database.
 - **ZIP 227 issuance is public.** The first recipient address and the amount are visible on Zcash.
@@ -112,6 +116,26 @@ $HOME/zsa/target/release/zsa holder send assets/demo-coin-2 --amount 10000000 --
 $HOME/zsa/target/release/zsa holder burn assets/demo-coin-2 --amount 3000000 --key <holder key file>
 $HOME/zsa/target/release/zsa inspect <txid>
 ```
+
+**Threshold issuer (2-of-3 FROST).** Demo coin 3 is issued under a FROST group key. Three signer
+processes each hold a key share, and the service holds no key:
+
+```
+# key generation: one process per participant, each writes its own share
+zsa signer dkg --id 1 --n 3 --t 2 --exchange <dir> --share <share file> --group <group file>
+#   (the same with --id 2 and --id 3)
+
+# each signer, with its own share
+zsa signer serve --share <share file> --group <group file> --listen 127.0.0.1:39301
+
+# the service asks the signers; 2 of the 3 must agree
+zsa serve --group <group file> --signers 127.0.0.1:39301,127.0.0.1:39302,127.0.0.1:39303 --threshold 2
+```
+
+With one signer offline, the other two sign and the twin is issued. With only one signer online,
+there is no signature and nothing is issued; the burn waits until a second signer is back. On chain,
+the signature is one ordinary BIP-340 signature, so `check` and `audit` work as for any issuer. What
+each signer checks, and the limits of this setup, are in [RULES.md §6](docs/RULES.md).
 
 **A page per twin:** `zsa pages --out site` writes `site/index.html` and one page per twin: the asset,
 its supply, every issuance with the Solana burn behind it, every burn on Zcash, the audit result, the

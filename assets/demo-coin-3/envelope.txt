@@ -1,0 +1,1 @@
+{"v":1,"name":"Sapling testnet demo coin 3 (no value)","sha256":"9057887cd30fe3ec35b169382616fd0a5caa6d75d27c735e45e02d43c49d6048"}

@@ -16,6 +16,11 @@
       "kind": "burn",
       "dir": "assets/demo-coin-2",
       "note": "Demo coin 2, issued one-way for each burn on Solana devnet."
+    },
+    {
+      "kind": "burn",
+      "dir": "assets/demo-coin-3",
+      "note": "Demo coin 3, issued one-way for each burn on Solana devnet, signed by 2 of 3 signers."
     }
   ]
 }

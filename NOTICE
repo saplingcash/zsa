@@ -23,6 +23,9 @@ it is used as a dependency, a tool, or a specification.
 - ZMD-1 by ZecBit (MIT), compared in docs/METADATA.md: https://github.com/Zecbit-nft/zmd1
 - The Sapling proving parameters (sapling-spend.params, sapling-output.params) are downloaded from
   https://download.z.cash and checked by SHA-256; they are not in this repository.
+- FROST(secp256k1, SHA-256) with BIP-340 signatures, frost-secp256k1-tr by the Zcash Foundation
+  (MIT OR Apache-2.0): https://github.com/ZcashFoundation/frost, used as a library dependency for the
+  threshold issuer. FROST is specified in RFC 9591.
 - Solana devnet helpers use @solana/web3.js (MIT) and @solana/spl-token (Apache-2.0).
 - Other Rust dependencies are under permissive licenses: mostly MIT and/or Apache-2.0, plus
   BSD-2-Clause, BSD-3-Clause, Zlib, CC0-1.0 and Unicode-3.0. See Cargo.lock.

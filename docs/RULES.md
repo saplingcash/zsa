@@ -96,7 +96,8 @@ The result is OK only if nothing above failed.
 ## 4. What the rules cannot do
 
 - **Stop the issuer.** The rules make a bad issuance visible, in one run, to anyone. They cannot stop
-  it: only the issuer's key can issue, and the issuer holds it.
+  it: whoever can sign for the issuer key can issue. With a threshold issuer (§6), that takes a
+  threshold of the signers, not one key holder.
 - **Return a burn that does not ask correctly.** A burn with no memo, two memos, an address that is
   not a test-network unified address with an Orchard receiver, or another coin's mint is never
   answered. The coins stay burned.
@@ -123,3 +124,41 @@ The result is OK only if nothing above failed.
   causes a second answer.
 - Every issuance is written to the state file, with its raw bytes, before it is submitted.
 - After a restart, an issuance that is not on chain yet is re-submitted byte for byte, never rebuilt.
+
+## 6. A threshold issuer
+
+An issuer key can be a FROST group key (RFC 9591, the ciphersuite FROST(secp256k1, SHA-256) with
+BIP-340 signatures). The listed key is the group's x-only public key, `[0x00] || ik`, like any other
+issuer key. On chain, a threshold issuance is an ordinary ZIP 227 issuance: one BIP-340 signature
+under `ik`. The rules in §1–§5 apply unchanged, and `audit` does not need to know which kind of
+issuer signed.
+
+- **Key generation.** `zsa signer dkg` is one participant's part of FROST's distributed key
+  generation. Each participant ends with its own key share and the group's public key package. The
+  full issuance key `isk` is never formed, by anyone.
+- **Signing.** `zsa signer serve` holds one key share. The issuer service (`zsa serve --group`)
+  holds no key. It builds the issuance, asks the signers, and needs `t` of the `n` signers to agree.
+  It then aggregates their shares into the signature and checks it before submitting.
+- **Each signer checks the issuance on its own** before it commits to a signing session:
+  - the transaction's issuer is the group key;
+  - its shape is a twin issuance (§2);
+  - the twin is a listed `burn` twin of this group;
+  - the cited burn is a valid twin burn on Solana (§2.8), for the cited amount, to the recipient in
+    its memo;
+  - the burn has not already been answered on chain.
+
+  In the signing round it signs only the sighash of the transaction it checked. Each nonce is used
+  once, and a session expires after 300 seconds.
+- **Fewer than `t` signers** means no signature and no issuance. The burn stays unanswered and is
+  tried again on the next pass.
+- **Untweaked keys only.** A Taproot-tweaked FROST signature (BIP-341) is not valid under `ik`, and the
+  node refuses it.
+
+**Limits of the implementation here:**
+
+- The signers talk to the service over plain TCP, one JSON line per request. Run them on a private
+  network.
+- The DKG exchanges its packages through a shared directory. That suits processes on one machine. The
+  second-round packages are secret: between machines, they need authenticated, confidential channels.
+- The demo runs all signers on one machine. Separate machines, operators and RPC endpoints are what
+  make the signers independent in practice.
