@@ -35,18 +35,22 @@ impl SolanaRpc {
 
     fn call(&self, method: &str, params: Value) -> Result<Value, String> {
         let body = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-        let resp: Value = self
-            .http
-            .post(&self.url)
-            .json(&body)
-            .send()
-            .map_err(|e| format!("{method}: {e}"))?
-            .json()
-            .map_err(|e| format!("{method}: bad response: {e}"))?;
-        if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
-            return Err(format!("{method}: {}", err.get("message").and_then(Value::as_str).unwrap_or("error")));
+        // Public RPCs rate-limit (HTTP 429): wait and try again a few times before giving up.
+        let mut wait = std::time::Duration::from_millis(500);
+        for attempt in 0.. {
+            let resp = self.http.post(&self.url).json(&body).send().map_err(|e| format!("{method}: {e}"))?;
+            if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < 6 {
+                std::thread::sleep(wait);
+                wait *= 2;
+                continue;
+            }
+            let resp: Value = resp.json().map_err(|e| format!("{method}: bad response: {e}"))?;
+            if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
+                return Err(format!("{method}: {}", err.get("message").and_then(Value::as_str).unwrap_or("error")));
+            }
+            return Ok(resp.get("result").cloned().unwrap_or(Value::Null));
         }
-        Ok(resp.get("result").cloned().unwrap_or(Value::Null))
+        unreachable!()
     }
 
     /// The genesis hash, to tell clusters apart.
