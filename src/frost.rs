@@ -117,3 +117,32 @@ pub fn sign_in_process(
     }
     aggregate(&package, &shares, pkp, tweak)
 }
+
+/// Distributed key generation, one participant at a time (each signer process runs its own part).
+pub mod dkg {
+    use super::*;
+
+    pub type Round1Secret = frost::keys::dkg::round1::SecretPackage;
+    pub type Round1Package = frost::keys::dkg::round1::Package;
+    pub type Round2Secret = frost::keys::dkg::round2::SecretPackage;
+    pub type Round2Package = frost::keys::dkg::round2::Package;
+
+    pub fn part1(id: Identifier, n: u16, t: u16) -> Result<(Round1Secret, Round1Package), String> {
+        frost::keys::dkg::part1(id, n, t, OsRng).map_err(|e| e.to_string())
+    }
+
+    pub fn part2(
+        secret: Round1Secret,
+        others: &BTreeMap<Identifier, Round1Package>,
+    ) -> Result<(Round2Secret, BTreeMap<Identifier, Round2Package>), String> {
+        frost::keys::dkg::part2(secret, others).map_err(|e| e.to_string())
+    }
+
+    pub fn part3(
+        secret: &Round2Secret,
+        others_r1: &BTreeMap<Identifier, Round1Package>,
+        for_me: &BTreeMap<Identifier, Round2Package>,
+    ) -> Result<(KeyPackage, PublicKeyPackage), String> {
+        frost::keys::dkg::part3(secret, others_r1, for_me).map_err(|e| e.to_string())
+    }
+}

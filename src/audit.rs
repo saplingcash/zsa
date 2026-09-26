@@ -130,12 +130,12 @@ pub struct AuditResult {
 }
 
 /// What one issuance transaction says, if it has the shape a twin issuance must have.
-struct Shape {
-    asset: AssetBase,
-    amount: u64,
-    finalized: bool,
-    citation: Option<Citation>,
-    recipient: [u8; 43],
+pub(crate) struct Shape {
+    pub asset: AssetBase,
+    pub amount: u64,
+    pub finalized: bool,
+    pub citation: Option<Citation>,
+    pub recipient: [u8; 43],
 }
 
 pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
@@ -145,15 +145,22 @@ pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, 
 
 /// RULES §2.3–2.7 on one transaction (everything that does not need the registry or history).
 fn shape(tx: &Transaction) -> Result<Shape, String> {
+    let s = shape_unsigned(tx)?;
     let bundle = tx.issue_bundle().ok_or("no issuance bundle")?;
-    if tx.transparent_bundle().is_some_and(|b| !b.vin.is_empty()) {
-        return Err("has transparent inputs".into());
-    }
     let sighash: [u8; 32] = *tx.txid().as_ref();
     bundle
         .ik()
         .verify(&sighash, bundle.authorization().signature().sig())
         .map_err(|_| "issuance signature does not verify over the txid digest")?;
+    Ok(s)
+}
+
+/// RULES §2.3–2.7 except the issuance signature: what a threshold signer checks before signing.
+pub(crate) fn shape_unsigned(tx: &Transaction) -> Result<Shape, String> {
+    let bundle = tx.issue_bundle().ok_or("no issuance bundle")?;
+    if tx.transparent_bundle().is_some_and(|b| !b.vin.is_empty()) {
+        return Err("has transparent inputs".into());
+    }
     if bundle.actions().len() != 1 {
         return Err(format!("{} issue actions (exactly 1 expected)", bundle.actions().len()));
     }
@@ -182,7 +189,7 @@ fn shape(tx: &Transaction) -> Result<Shape, String> {
 
 /// RULES §2.8: the cited burn exists (finalized), burns this twin's mint, exactly the cited amount,
 /// carries one sapling-twin memo, and the issued note goes to the memo's address.
-fn check_burn(c: &Citation, s: &Shape, twin: &TwinOf, rpc: &SolanaRpc) -> Result<Burn, String> {
+pub(crate) fn check_burn(c: &Citation, s: &Shape, twin: &TwinOf, rpc: &SolanaRpc) -> Result<Burn, String> {
     let sig = c.signature_b58();
     let tx = match rpc.transaction(&sig) {
         Ok(Some(tx)) => tx,

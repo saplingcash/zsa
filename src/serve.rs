@@ -79,11 +79,27 @@ const SOLANA_MAINNET_GENESIS: &str = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N
 pub struct Options {
     pub root: PathBuf,
     pub network: String,
-    pub key: PathBuf,
+    /// A single issuer key (a BIP-39 phrase file) ...
+    pub key: Option<PathBuf>,
+    /// ... or a FROST group: its public key package, the signers' addresses, and the threshold.
+    pub group: Option<PathBuf>,
+    pub signers: Vec<String>,
+    pub threshold: usize,
     pub state: PathBuf,
     pub node: Option<String>,
     pub interval: Duration,
     pub once: bool,
+}
+
+/// Who signs issuances: one key held by the service, or a threshold group of separate signers.
+enum Authority {
+    Key(String),
+    Group {
+        pkp: crate::frost::PublicKeyPackage,
+        ik: orchard::issuance::auth::IssueValidatingKey<orchard::issuance::auth::ZSASchnorr>,
+        signers: Vec<String>,
+        threshold: usize,
+    },
 }
 
 struct BurnTwin {
@@ -106,8 +122,23 @@ pub fn run(opts: &Options) -> Result<(), String> {
         return Err(format!("node {node_url} is not {} (genesis differs)", opts.network));
     }
 
-    let phrase = keys::read_phrase(&opts.key)?;
-    let issuer = keys::issuer_hex(&keys::issuance_key(&phrase)?);
+    let (authority, issuer) = match (&opts.key, &opts.group) {
+        (Some(k), None) => {
+            let phrase = keys::read_phrase(k)?;
+            let issuer = keys::issuer_hex(&keys::issuance_key(&phrase)?);
+            (Authority::Key(phrase), issuer)
+        }
+        (None, Some(g)) => {
+            let pkp = crate::signer::read_group(g)?;
+            let ik = crate::threshold::issuer_from_xonly(&crate::frost::group_xonly(&pkp)?)?;
+            let issuer = hex::encode(ik.encode());
+            if opts.threshold == 0 || opts.signers.len() < opts.threshold {
+                return Err(format!("{} signer(s) given for a threshold of {}", opts.signers.len(), opts.threshold));
+            }
+            (Authority::Group { pkp, ik, signers: opts.signers.clone(), threshold: opts.threshold }, issuer)
+        }
+        _ => return Err("give either --key or --group with --signers".into()),
+    };
     let listed: HashMap<String, &IssuerEntry> = issuers
         .issuers
         .iter()
@@ -123,6 +154,11 @@ pub fn run(opts: &Options) -> Result<(), String> {
     for t in twins_file.twins.iter().filter(|t| t.kind == "burn") {
         let dir = t.dir.as_deref().ok_or("a burn twin without dir")?;
         let (label, _asset, _, twin_of) = audit::twin_with_metadata(&opts.root, dir, &listed, &opts.network)?;
+        // Only this issuer's twins: another issuer's twin is a different asset.
+        let twin_issuer = fs::read_to_string(opts.root.join(dir).join("issuer.txt")).map_err(|e| e.to_string())?;
+        if twin_issuer.trim().to_lowercase() != issuer {
+            continue;
+        }
         let url = network
             .solana_rpc
             .get(&twin_of.cluster)
@@ -135,7 +171,7 @@ pub fn run(opts: &Options) -> Result<(), String> {
         twins.push(BurnTwin { label, envelope, twin_of, rpc });
     }
     if twins.is_empty() {
-        return Err("no burn twin in registry/twins.json".into());
+        return Err(format!("no burn twin of issuer {issuer} in registry/twins.json"));
     }
     println!("issuer {issuer} on {} ({node_url}); watching:", opts.network);
     for t in &twins {
@@ -147,7 +183,7 @@ pub fn run(opts: &Options) -> Result<(), String> {
         state.scanned_to = entry.valid_from.saturating_sub(1);
     }
     loop {
-        if let Err(e) = pass(&mut state, &opts.state, &node, &node_url, &phrase, &issuer, &twins) {
+        if let Err(e) = pass(&mut state, &opts.state, &node, &node_url, &authority, &issuer, &twins) {
             eprintln!("pass failed (will retry): {e}");
         }
         if opts.once {
@@ -162,7 +198,7 @@ fn pass(
     state_path: &Path,
     node: &Node,
     node_url: &str,
-    phrase: &str,
+    authority: &Authority,
     issuer: &str,
     twins: &[BurnTwin],
 ) -> Result<(), String> {
@@ -230,7 +266,27 @@ fn pass(
             };
             let citation = Citation::for_burn(&sig, burn.amount)?;
             let opts = BuildOptions { citation: Some(citation), ..Default::default() };
-            let (tx, _, _) = issue::build(phrase, &t.envelope, burn.amount, recipient, &opts, node)?;
+            let tx = match authority {
+                Authority::Key(phrase) => issue::build(phrase, &t.envelope, burn.amount, recipient, &opts, node)?.0,
+                Authority::Group { pkp, ik, signers, threshold } => {
+                    let u = crate::threshold::build_unsigned(ik, &t.envelope, burn.amount, recipient, &opts, node)?;
+                    let mut raw = Vec::new();
+                    u.tx.write(&mut raw).map_err(|e| e.to_string())?;
+                    println!("{}: burn {sig}: asking {} signers ({threshold} needed)", t.label, signers.len());
+                    match crate::signer::request_signature(signers, pkp, *threshold, &hex::encode(&raw), &u.sighash) {
+                        Ok(sig64) => {
+                            let tx = crate::threshold::attach(u.tx, &sig64)?;
+                            crate::threshold::verify_issuance_signature(&tx)?;
+                            tx
+                        }
+                        Err(e) => {
+                            // Not recorded: the burn is tried again on the next pass.
+                            println!("{}: burn {sig}: {e}", t.label);
+                            continue;
+                        }
+                    }
+                }
+            };
             let txid = tx.txid().to_string();
             let mut raw = Vec::new();
             tx.write(&mut raw).map_err(|e| e.to_string())?;

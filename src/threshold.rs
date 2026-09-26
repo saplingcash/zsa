@@ -45,7 +45,6 @@ pub struct Unsigned {
     pub tx: Transaction,
     pub sighash: [u8; 32],
     pub asset: AssetBase,
-    pub first_issuance: bool,
 }
 
 /// The issuer as it appears on chain (`[0x00] || ik`) for an x-only group key.
@@ -186,7 +185,7 @@ pub fn build_unsigned(
     if *tx.txid().as_ref() != sighash {
         return Err("the sighash is not the txid digest (transparent inputs?)".into());
     }
-    Ok(Unsigned { tx, sighash, asset, first_issuance: first })
+    Ok(Unsigned { tx, sighash, asset })
 }
 
 /// Put a 64-byte BIP-340 signature into a transaction's issue bundle. The txid does not change.

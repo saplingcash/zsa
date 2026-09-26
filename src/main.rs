@@ -21,6 +21,7 @@ mod pages;
 mod rpc;
 mod scan;
 mod serve;
+mod signer;
 mod solana;
 mod threshold;
 mod vectors;
@@ -56,8 +57,18 @@ enum Cmd {
     },
     /// The issuer service: watch Solana for burns of every burn twin and issue each twin once.
     Serve {
+        /// A single issuer key (a BIP-39 phrase file).
         #[arg(long)]
-        key: PathBuf,
+        key: Option<PathBuf>,
+        /// A FROST group's public key package: issue with threshold signatures instead of a key.
+        #[arg(long)]
+        group: Option<PathBuf>,
+        /// The group's signers (host:port), with --group.
+        #[arg(long, value_delimiter = ',')]
+        signers: Vec<String>,
+        /// Signatures needed, with --group.
+        #[arg(long, default_value_t = 2)]
+        threshold: usize,
         #[arg(long, default_value = "qedit-zsa-test")]
         network: String,
         /// The directory holding registry/ and assets/.
@@ -105,6 +116,11 @@ enum Cmd {
         txid: String,
         #[arg(long, default_value = rpc::DEFAULT_NODE)]
         node: String,
+    },
+    /// A threshold signer of the issuer key: key generation, and the signing server.
+    Signer {
+        #[command(subcommand)]
+        cmd: SignerCmd,
     },
     /// Print the issuer (hex of [0x00] || ik) for a key file.
     Issuer {
@@ -154,6 +170,44 @@ enum Cmd {
         txid: Vec<String>,
         #[arg(long, default_value = rpc::DEFAULT_NODE)]
         node: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SignerCmd {
+    /// One participant's part of the distributed key generation (run one process per participant).
+    Dkg {
+        #[arg(long)]
+        id: u16,
+        #[arg(long, default_value_t = 3)]
+        n: u16,
+        #[arg(long, default_value_t = 2)]
+        t: u16,
+        /// Directory the participants exchange packages through.
+        #[arg(long)]
+        exchange: PathBuf,
+        /// Where this participant's key share is written (keep it private).
+        #[arg(long)]
+        share: PathBuf,
+        /// Where the group's public key package is written.
+        #[arg(long)]
+        group: PathBuf,
+    },
+    /// Serve signature shares for issuances that pass this signer's own checks.
+    Serve {
+        #[arg(long)]
+        share: PathBuf,
+        #[arg(long)]
+        group: PathBuf,
+        /// host:port to listen on (keep it on a private interface).
+        #[arg(long)]
+        listen: String,
+        #[arg(long, default_value = "qedit-zsa-test")]
+        network: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        node: Option<String>,
     },
 }
 
@@ -232,11 +286,14 @@ fn run(cli: Cli) -> Result<bool, String> {
             println!("{}", address::encode_orchard(addr.to_raw_address_bytes())?);
             Ok(true)
         }
-        Cmd::Serve { key, network, root, state, node, interval, once } => {
+        Cmd::Serve { key, group, signers, threshold, network, root, state, node, interval, once } => {
             serve::run(&serve::Options {
                 root,
                 network,
                 key,
+                group,
+                signers,
+                threshold,
                 state,
                 node,
                 interval: std::time::Duration::from_secs(interval),
@@ -282,6 +339,18 @@ fn run(cli: Cli) -> Result<bool, String> {
                 println!("{}", out.join(f).display());
             }
             println!("audit: {}", if result.report.passed() { "OK" } else { "FAIL" });
+            Ok(true)
+        }
+        Cmd::Signer { cmd } => {
+            match cmd {
+                SignerCmd::Dkg { id, n, t, exchange, share, group } => {
+                    let issuer = signer::dkg(id, n, t, &exchange, &share, &group)?;
+                    println!("participant {id}: key share written to {}; group issuer {issuer}", share.display());
+                }
+                SignerCmd::Serve { share, group, listen, network, root, node } => {
+                    signer::serve(&signer::ServeOptions { share, group, listen, root, network, node })?;
+                }
+            }
             Ok(true)
         }
         Cmd::Inspect { txid, node } => {
