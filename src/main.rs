@@ -15,6 +15,7 @@ mod keys;
 mod metadata;
 mod rpc;
 mod scan;
+mod serve;
 mod solana;
 mod vectors;
 
@@ -39,6 +40,35 @@ enum Cmd {
     Keygen {
         #[arg(long)]
         out: PathBuf,
+    },
+    /// Print a test wallet's unified address (test network, Orchard receiver) for a key file.
+    Address {
+        #[arg(long)]
+        key: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        account: u32,
+    },
+    /// The issuer service: watch Solana for burns of every burn twin and issue each twin once.
+    Serve {
+        #[arg(long)]
+        key: PathBuf,
+        #[arg(long, default_value = "qedit-zsa-test")]
+        network: String,
+        /// The directory holding registry/ and assets/.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// State file (kept out of version control).
+        #[arg(long, default_value = ".private/serve-state.json")]
+        state: PathBuf,
+        /// Override the network's RPC URL from registry/issuers.json (e.g. a local node).
+        #[arg(long)]
+        node: Option<String>,
+        /// Seconds between passes.
+        #[arg(long, default_value_t = 15)]
+        interval: u64,
+        /// One pass, then exit.
+        #[arg(long)]
+        once: bool,
     },
     /// Print the issuer (hex of [0x00] || ik) for a key file.
     Issuer {
@@ -130,6 +160,23 @@ fn run(cli: Cli) -> Result<bool, String> {
             let issuer = keys::keygen(&out)?;
             println!("key written to {} (never commit it)", out.display());
             println!("issuer {issuer}");
+            Ok(true)
+        }
+        Cmd::Address { key, account } => {
+            let addr = issue::test_address(&keys::read_phrase(&key)?, account)?;
+            println!("{}", address::encode_orchard(addr.to_raw_address_bytes())?);
+            Ok(true)
+        }
+        Cmd::Serve { key, network, root, state, node, interval, once } => {
+            serve::run(&serve::Options {
+                root,
+                network,
+                key,
+                state,
+                node,
+                interval: std::time::Duration::from_secs(interval),
+                once,
+            })?;
             Ok(true)
         }
         Cmd::Issuer { key } => {

@@ -11,6 +11,11 @@
       "kind": "direct-test",
       "dir": "assets/demo-coin-1",
       "note": "Demo coin 1, issued directly as a test, not against burns."
+    },
+    {
+      "kind": "burn",
+      "dir": "assets/demo-coin-2",
+      "note": "Demo coin 2, issued one-way for each burn on Solana devnet."
     }
   ]
 }

@@ -104,7 +104,7 @@ struct Shape {
     recipient: [u8; 43],
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
+pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
     let bytes = fs::read(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
     serde_json::from_slice(&bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -383,7 +383,7 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>, skip_
 }
 
 /// A `burn` or `direct-test` twin: verify its published metadata and derive its asset.
-fn twin_with_metadata(
+pub(crate) fn twin_with_metadata(
     root: &Path,
     dir_name: &str,
     listed: &HashMap<String, &IssuerEntry>,

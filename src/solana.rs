@@ -155,3 +155,96 @@ pub fn parse_burn(signature: &str, tx: &Value, expected_mint: Option<&str>) -> R
     let slot = tx.get("slot").and_then(Value::as_u64).unwrap_or(0);
     Ok(Burn { signature: signature.to_string(), slot, mint, amount, zcash_address, orchard_receiver })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Real Solana devnet transactions (getTransaction, jsonParsed, finalized).
+    const VALID: &str = include_str!("../tests/fixtures/solana/valid-burn.json");
+    const NO_MEMO: &str = include_str!("../tests/fixtures/solana/no-memo.json");
+    const OTHER_MINT: &str = include_str!("../tests/fixtures/solana/other-mint.json");
+    const MINT: &str = "25PVFmBUJzvuCWeni4fgE15pQhTNEwMLyakK3aWN97q4";
+    const HOLDER: &str = "utest1ytaymgygt6suas43ay6wfnuree5te8v7ex64ayy9p74t8jcdj0wzf2736602t9yf05apdu7pjn9hav2tfs5maasgvhngnze5zyqj7pyk";
+
+    fn tx(s: &str) -> Value {
+        serde_json::from_str(s).unwrap()
+    }
+
+    fn sig(v: &Value) -> String {
+        v.pointer("/transaction/signatures/0").unwrap().as_str().unwrap().to_string()
+    }
+
+    fn memo_instruction(v: &Value) -> Value {
+        instructions(v)
+            .into_iter()
+            .find(|i| i.get("program").and_then(Value::as_str) == Some("spl-memo"))
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn a_real_twin_burn_parses() {
+        let v = tx(VALID);
+        let b = parse_burn(&sig(&v), &v, Some(MINT)).unwrap();
+        assert_eq!(b.mint, MINT);
+        assert_eq!(b.amount, 25_000_000);
+        assert_eq!(b.zcash_address, HOLDER);
+        assert_eq!(b.orchard_receiver, crate::address::orchard_receiver(HOLDER).unwrap());
+    }
+
+    #[test]
+    fn a_burn_without_memo_is_refused() {
+        let v = tx(NO_MEMO);
+        let e = parse_burn(&sig(&v), &v, Some(MINT)).unwrap_err();
+        assert!(e.contains("0 sapling-twin memos"), "{e}");
+    }
+
+    #[test]
+    fn a_burn_of_another_mint_is_refused() {
+        let v = tx(OTHER_MINT);
+        let e = parse_burn(&sig(&v), &v, Some(MINT)).unwrap_err();
+        assert!(e.contains("not the twin's mint"), "{e}");
+    }
+
+    #[test]
+    fn edited_copies_are_refused() {
+        let base = tx(VALID);
+        let s = sig(&base);
+
+        assert!(parse_burn(&sig(&tx(NO_MEMO)), &base, Some(MINT)).unwrap_err().contains("not the one cited"));
+
+        let mut failed = base.clone();
+        failed["meta"]["err"] = serde_json::json!({"InstructionError": [0, "Custom"]});
+        assert!(parse_burn(&s, &failed, Some(MINT)).unwrap_err().contains("failed"));
+
+        let mut two_memos = base.clone();
+        let memo = memo_instruction(&base);
+        two_memos["transaction"]["message"]["instructions"].as_array_mut().unwrap().push(memo);
+        assert!(parse_burn(&s, &two_memos, Some(MINT)).unwrap_err().contains("2 sapling-twin memos"));
+
+        let mut two_burns = base.clone();
+        let burn = instructions(&base)
+            .into_iter()
+            .find(|i| i.pointer("/parsed/type").and_then(Value::as_str) == Some("burnChecked"))
+            .unwrap()
+            .clone();
+        two_burns["transaction"]["message"]["instructions"].as_array_mut().unwrap().push(burn);
+        assert!(parse_burn(&s, &two_burns, Some(MINT)).unwrap_err().contains("2 token burns"));
+
+        let mut mainnet = base.clone();
+        let main_ua = zcash_address::unified::Encoding::encode(
+            &<zcash_address::unified::Address as zcash_address::unified::Encoding>::try_from_items(vec![
+                zcash_address::unified::Receiver::Orchard([7u8; 43]),
+            ])
+            .unwrap(),
+            &zcash_protocol::consensus::NetworkType::Main,
+        );
+        for i in mainnet["transaction"]["message"]["instructions"].as_array_mut().unwrap() {
+            if i.get("program").and_then(Value::as_str) == Some("spl-memo") {
+                i["parsed"] = Value::String(format!("{MEMO_PREFIX}{main_ua}"));
+            }
+        }
+        assert!(parse_burn(&s, &mainnet, Some(MINT)).unwrap_err().contains("mainnet"));
+    }
+}

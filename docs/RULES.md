@@ -7,8 +7,7 @@ Words used below:
 - **Network:** a ZSA test network named in `registry/issuers.json`, identified by its genesis block
   hash.
 
-`zsa audit` implements §1–§3 on the Zcash side. The checks marked **against Solana** are not
-implemented in this version.
+`zsa audit` implements §1–§3, on Zcash and, for burn twins, against Solana.
 
 ## 1. The registry
 
@@ -45,27 +44,28 @@ A Zcash transaction is a **valid twin issuance** only if all of these hold:
    issuance of the asset, it also has the zero-value reference note ZIP 227 requires.
 6. **It is not finalized.** Twins follow burns, so their supply stays open.
 7. **Burn twins only: it carries exactly one burn citation.** This is a zero-value `OP_RETURN` output
-   of 45 bytes:
+   of 77 bytes, inside the 80-byte relay limit:
 
    | Bytes | Field |
    |---|---|
    | 0–3 | `SPLT` (protocol tag) |
    | 4 | version `1` |
-   | 5–36 | SHA-256 of the Solana burn transaction's signature (64 raw bytes) |
-   | 37–44 | the amount, u64 little-endian; must equal the value note's amount |
+   | 5–68 | the Solana burn transaction's signature (64 raw bytes) |
+   | 69–76 | the amount, u64 little-endian; must equal the value note's amount |
 
    The citation sits in the same transaction the issuer signs, so it is covered by the issuance
    signature. ZIP 227 issued notes have no memo field.
-8. **First citation wins.** It is the first transaction, in chain order (height, then position in the
-   block), that satisfies 1–7 and cites that burn. Later ones are **duplicates**.
-
-**Against Solana** (not implemented in this version):
-
-- the cited burn exists and is confirmed;
-- it burns this twin's mint;
-- it burns exactly the cited amount;
-- it carries exactly one `sapling-twin:1:<address>` memo;
-- the value note's recipient is that address's Orchard receiver.
+8. **Burn twins only: the cited burn checks out against Solana.** The checks run on the burn
+   transaction the citation names, read at `finalized` commitment from the cluster's RPC in
+   `registry/issuers.json`:
+   - it exists and succeeded;
+   - it has exactly one token burn (`burn` or `burnChecked`, top-level or inner), of this twin's mint;
+   - it burns exactly the cited amount, in base units;
+   - it carries exactly one memo `sapling-twin:1:<address>`, where `<address>` is a test-network
+     unified address (ZIP 316) with an Orchard receiver;
+   - the value note's recipient is that Orchard receiver.
+9. **First valid citation wins.** It is the first transaction, in chain order (height, then position
+   in the block), that satisfies 1–8 for that burn. Later ones are **duplicates**.
 
 ## 3. What `audit` reports
 
@@ -76,7 +76,7 @@ tip. It collects every issuance signed by a listed issuer.
 
 - `burn` twins:
   - every issuance is valid, or it is reported as:
-    - **unbacked**: no citation, or its amount differs;
+    - **unbacked**: no citation, its amount differs, or the burn does not check out against Solana;
     - **duplicate**;
     - **malformed**;
   - **the invariant:** supply on the node = the sum of valid issuances.
@@ -94,8 +94,28 @@ The result is OK only if nothing above failed.
 
 - **Stop the issuer.** The rules make a bad issuance visible, in one run, to anyone. They cannot stop
   it: only the issuer's key can issue, and the issuer holds it.
+- **Return a burn that does not ask correctly.** A burn with no memo, two memos, an address that is
+  not a test-network unified address with an Orchard receiver, or another coin's mint is never
+  answered. The coins stay burned.
 - **Protect privacy at issuance.** ZIP 227 issuance is transparent. The recipient address and the
   amount are public.
 - **Work across a test-network reset.** A reset erases the Zcash side. The same key and description
   give the same asset id on a new network, and burns on Solana still stand. So after a reset, twins can
   be re-issued from the burns and checked again from scratch.
+
+## 5. The issuer service
+
+`zsa serve` answers burns automatically:
+
+- It watches the Solana cluster of every `burn` twin for finalized transactions touching the twin's
+  mint.
+- It checks each one with the same code `audit` uses (§2.8), and issues the twin once, citing the
+  burn, to the memo's address.
+- A transaction that is not a valid twin burn is recorded as skipped, with the reason, and not retried.
+
+**Answering at most once:**
+
+- The burns already cited by the issuer are found by scanning the chain, so a lost state file never
+  causes a second answer.
+- Every issuance is written to the state file, with its raw bytes, before it is submitted.
+- After a restart, an issuance that is not on chain yet is re-submitted byte for byte, never rebuilt.

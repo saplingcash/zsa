@@ -16,6 +16,8 @@ The `zsa` command-line tool:
 |---|---|
 | `describe <coin-dir>` | Builds a twin's metadata from `coin.json`, and prints its asset identifiers. The metadata is a Cachet v1 bundle and envelope; see [docs/METADATA.md](docs/METADATA.md). |
 | `keygen`, `issuer` | Creates a test issuer key (a BIP-39 phrase), and prints its public issuer key. |
+| `address` | Prints a test wallet's unified address (test network, Orchard receiver): the address a burn memo names. |
+| `serve` | The issuer service: watches Solana for burns of every burn twin and issues each twin once, citing the burn ([RULES.md §5](docs/RULES.md)). |
 | `issue <coin-dir>` | Builds and submits an issuance on a ZSA test node, optionally with a burn citation. |
 | `check <coin-dir>` | Re-derives a twin's issuances from public data only: the metadata, the asset id, the transactions, the issuer's signature and the node's supply record. |
 | `audit` | Applies [docs/RULES.md](docs/RULES.md) to every twin in `registry/`, by scanning the chain. |
@@ -64,6 +66,23 @@ $HOME/zsa/target/release/zsa audit
 - classifies each issuance by a listed issuer: valid, unbacked, duplicate, malformed, or unknown asset;
 - compares each twin's supply with the node's record.
 
+**Burn to twin, on Solana devnet and the ZSA test network:**
+
+```
+# the holder's Zcash address (a test wallet)
+$HOME/zsa/target/release/zsa address --key <holder key file>
+
+# burn 25 tokens of demo coin 2 on devnet, with the memo sapling-twin:1:<that address>
+node solana/burn-for-twin.mjs demo-coin-2 25 utest1...
+
+# the issuer service answers the burn with the twin, then anyone can check both chains
+$HOME/zsa/target/release/zsa serve --key <issuer key file> --once
+$HOME/zsa/target/release/zsa audit
+```
+
+`audit` then shows the issuance as valid, backed by that burn: the signature, the slot and the
+address.
+
 **Test vectors.** These run against a local ZSA node: QEDIT's Zebra in Docker (rootless works),
 regtest with ZSA active from height 1, RPC on `127.0.0.1:38232` only, and a fresh chain on every start.
 
@@ -94,8 +113,8 @@ Each must get exactly the verdict docs/RULES.md predicts, with no other failure.
 - The asset base, note parsing and the signature scheme come from QEDIT's crates. The tools are not an
   independent implementation of the protocol.
 - They trust the node to serve the chain.
-- The Solana-side checks of the rules (RULES.md §2, "against Solana") are not implemented in this
-  version.
+- The Solana-side checks read the cited burn from the cluster's public RPC, at `finalized`
+  commitment. They trust that RPC to serve the chain.
 
 ## Layout
 
@@ -105,11 +124,11 @@ assets/<coin>/           a twin's metadata, issuer and issuance txids
 registry/                listed issuer keys (with validity heights) and twins
 docs/RULES.md            what counts as a valid twin issuance
 docs/METADATA.md         the metadata format (Cachet v1) and the Solana link
-solana/                  Solana devnet helpers (test mints); devnet/localnet only
+solana/                  Solana devnet helpers (test mints, burns for a twin); devnet/localnet only
 scripts/cargo-wsl.sh     build with the output on the Linux filesystem
 scripts/local-node.sh    a local ZSA node (QEDIT's Zebra) in Docker, for the test vectors
 scripts/public_check.py  leak guard, run in CI and in the git hooks
-tests/                   tests for the leak guard
+tests/                   tests for the leak guard; tests/fixtures: real devnet transactions for the Solana checks
 ```
 
 To turn on the git hooks after cloning:
