@@ -1,0 +1,3 @@
+#!/bin/sh
+# Refuse a commit that would put a secret or a private identifier into this (future public) repo.
+exec python scripts/public_check.py --staged

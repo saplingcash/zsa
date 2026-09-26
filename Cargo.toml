@@ -1,0 +1,59 @@
+[package]
+name = "saplingcash-zsa"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "OrchardZSA twins of Sapling (sapling.cash) coins: metadata, issuance and an independent checker. Test networks only."
+repository = "https://github.com/saplingcash/zsa"
+publish = false
+
+[[bin]]
+name = "zsa"
+path = "src/main.rs"
+
+[dependencies]
+# QEDIT's tx-tool (MIT) as a library: wallet sync, issuance building, block submission.
+# Pinned to the commit whose CI passes against QEDIT's Zebra `zsa1` 8c9c93fd.
+zcash_tx_tool = { git = "https://github.com/QED-it/zcash_tx_tool", rev = "45413e8" }
+
+orchard = { version = "0.14.0", features = ["zsa-issuance"] }
+zcash_primitives = { version = "0.28.0", features = ["transparent-inputs", "non-standard-fees", "zsa-issuance", "zip-233"] }
+zcash_protocol = "0.9.0"
+zcash_proofs = "0.28.0"
+zcash_encoding = "0.4.0"
+zcash_transparent = { version = "0.8.0", features = ["transparent-inputs"] }
+zip32 = "0.2"
+nonempty = "0.11.0"
+bip0039 = "0.12.0"
+diesel = { version = "2.3.9", features = ["sqlite"] }
+# Windows has no system SQLite: build it from source.
+libsqlite3-sys = { version = "0.36", features = ["bundled"] }
+
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.149"
+hex = "0.4.3"
+sha2 = "0.10"
+blake2b_simd = "=1.0.1"
+rand = "0.8.6"
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+
+# Same patches as zcash_tx_tool 45413e8 (patches do not propagate from dependencies).
+[patch.crates-io]
+orchard = { git = "https://github.com/QED-it/orchard", rev = "cf801a5d6701bc128e21678ba0034564af4a2aca" }
+sapling-crypto = { git = "https://github.com/QED-it/sapling-crypto", rev = "e785faaa5eaf67bd2cb328fdd82a345df44e5754" }
+zcash_note_encryption = { git = "https://github.com/zcash/zcash_note_encryption", rev = "9f7e93d42cef839d02b9d75918117941d453f8cb" }
+zcash_primitives = { git = "https://github.com/QED-it/librustzcash", rev = "c5c232db9c54eeb8bc1d0f4dc1b8a0e40f981bb0" }
+zcash_protocol = { git = "https://github.com/QED-it/librustzcash", rev = "c5c232db9c54eeb8bc1d0f4dc1b8a0e40f981bb0" }
+zcash_address = { git = "https://github.com/QED-it/librustzcash", rev = "c5c232db9c54eeb8bc1d0f4dc1b8a0e40f981bb0" }
+zcash_proofs = { git = "https://github.com/QED-it/librustzcash", rev = "c5c232db9c54eeb8bc1d0f4dc1b8a0e40f981bb0" }
+zcash_encoding = { git = "https://github.com/QED-it/librustzcash", rev = "c5c232db9c54eeb8bc1d0f4dc1b8a0e40f981bb0" }
+zcash_transparent = { git = "https://github.com/QED-it/librustzcash", rev = "c5c232db9c54eeb8bc1d0f4dc1b8a0e40f981bb0" }
+sinsemilla = { git = "https://github.com/zcash/sinsemilla", rev = "aabb707e862bc3d7b803c77d14e5a771bcee3e8c" }
+halo2_gadgets = { git = "https://github.com/QED-it/halo2", rev = "ef3d0ba2e9a513658f8d3d00294ddebd92cc649e" }
+halo2_proofs = { git = "https://github.com/QED-it/halo2", rev = "ef3d0ba2e9a513658f8d3d00294ddebd92cc649e" }
+halo2_poseidon = { git = "https://github.com/QED-it/halo2", rev = "ef3d0ba2e9a513658f8d3d00294ddebd92cc649e" }
+zcash_spec = { git = "https://github.com/QED-it/zcash_spec", rev = "d5e84264d2ad0646b587a837f4e2424ca64d3a05" }
+
+[profile.release]
+debug = false

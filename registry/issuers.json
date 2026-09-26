@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "networks": {
+    "qedit-zsa-test": {
+      "description": "QEDIT's public ZSA test network (no value)",
+      "rpc": "https://rpc.test-zsa.org:443",
+      "genesis": "f41f61ddf9610ae40f519ad2e9e543e065ef0357eeecf5a4cc08a765d9505756"
+    }
+  },
+  "issuers": [
+    {
+      "issuer": "00987406b7d98195de5fabad1496d4d41406e4b68080a7d3b83054349dbedac5aa",
+      "network": "qedit-zsa-test",
+      "valid_from": 590,
+      "valid_until": null,
+      "note": "Test issuer 1 (single key)."
+    }
+  ]
+}

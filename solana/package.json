@@ -1,0 +1,11 @@
+{
+  "name": "saplingcash-zsa-solana",
+  "private": true,
+  "type": "module",
+  "description": "Solana devnet helpers for the OrchardZSA twin demos. Devnet/localnet only.",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0"
+  }
+}

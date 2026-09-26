@@ -1,0 +1,101 @@
+# Rules: what counts as a twin issuance (v1)
+
+Words used below:
+
+- **Issuer:** a key listed in [`registry/issuers.json`](../registry/issuers.json).
+- **Twin:** an asset listed in [`registry/twins.json`](../registry/twins.json).
+- **Network:** a ZSA test network named in `registry/issuers.json`, identified by its genesis block
+  hash.
+
+`zsa audit` implements §1–§3 on the Zcash side. The checks marked **against Solana** are not
+implemented in this version.
+
+## 1. The registry
+
+- **`issuers.json`** lists each issuer key (`[0x00] || ik`, hex) with:
+  - the network it issues on;
+  - `valid_from`: the first height at which it may issue;
+  - `valid_until`: the last such height, or `null`.
+
+  A key is rotated by closing its range and adding a new key. It is never edited in place.
+- **`twins.json`** lists each twin with its kind:
+  - `burn`: issued only against burns on Solana. Its metadata is in `assets/<coin>/`.
+  - `direct-test`: issued directly as a test, not against burns. Its metadata is in `assets/<coin>/`
+    and says so.
+  - `undisclosed-test`: a test asset issued while testing the tools, listed by its asset id only. Its
+    description is not published, and it is never used for a coin.
+
+The registry is the issuer's public commitment. Every change to it is visible in this repository's
+history.
+
+## 2. A valid twin issuance
+
+A Zcash transaction is a **valid twin issuance** only if all of these hold:
+
+1. **It is mined on the network.** The network is checked by its genesis hash, so a reset network is
+   not confused with the old one.
+2. **Its issuer is listed.** The issuance bundle's issuer is a listed key, valid at the transaction's
+   height.
+3. **It has no transparent inputs.** Its shielded sighash is therefore its txid digest (ZIP 244), and
+   the BIP-340 issuance signature verifies over it.
+4. **It issues exactly one listed twin.** It has exactly one issue action, for the asset of a listed
+   twin. The asset is derived from the issuer and the twin's `envelope.txt`, whose metadata verifies
+   ([METADATA.md](METADATA.md)).
+5. **It has exactly one value note.** The action has one note with a value above zero. On the first
+   issuance of the asset, it also has the zero-value reference note ZIP 227 requires.
+6. **It is not finalized.** Twins follow burns, so their supply stays open.
+7. **Burn twins only: it carries exactly one burn citation.** This is a zero-value `OP_RETURN` output
+   of 45 bytes:
+
+   | Bytes | Field |
+   |---|---|
+   | 0–3 | `SPLT` (protocol tag) |
+   | 4 | version `1` |
+   | 5–36 | SHA-256 of the Solana burn transaction's signature (64 raw bytes) |
+   | 37–44 | the amount, u64 little-endian; must equal the value note's amount |
+
+   The citation sits in the same transaction the issuer signs, so it is covered by the issuance
+   signature. ZIP 227 issued notes have no memo field.
+8. **First citation wins.** It is the first transaction, in chain order (height, then position in the
+   block), that satisfies 1–7 and cites that burn. Later ones are **duplicates**.
+
+**Against Solana** (not implemented in this version):
+
+- the cited burn exists and is confirmed;
+- it burns this twin's mint;
+- it burns exactly the cited amount;
+- it carries exactly one `sapling-twin:1:<address>` memo;
+- the value note's recipient is that address's Orchard receiver.
+
+## 3. What `audit` reports
+
+`audit` scans every block of the network, from the earliest `valid_from` of any listed issuer to the
+tip. It collects every issuance signed by a listed issuer.
+
+**Per twin:**
+
+- `burn` twins:
+  - every issuance is valid, or it is reported as:
+    - **unbacked**: no citation, or its amount differs;
+    - **duplicate**;
+    - **malformed**;
+  - **the invariant:** supply on the node = the sum of valid issuances.
+- `direct-test` and `undisclosed-test` twins: the issuances are listed and summed, and must equal the
+  node's supply. The burn rules do not apply.
+
+**Across twins:**
+
+- any issuance by a listed issuer of an asset **not** in `twins.json` is a failure (**unknown asset**);
+- any finalized twin is a failure.
+
+The result is OK only if nothing above failed.
+
+## 4. What the rules cannot do
+
+- **Stop the issuer.** The rules make a bad issuance visible, in one run, to anyone. They cannot stop
+  it: only the issuer's key can issue, and the issuer holds it.
+- **Protect privacy at issuance.** ZIP 227 issuance is transparent. The recipient address and the
+  amount are public.
+- **Work across a test-network reset.** A reset erases the Zcash side. The same key and description
+  give the same asset id on a new network, and burns on Solana still stand. So after a reset, twins can
+  be re-issued from the burns and checked again from scratch.

@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "twins": [
+    {
+      "kind": "undisclosed-test",
+      "asset": "f089d9ae5963dc72830c83adcb95e52dc4e4730934c885e6c332195960993c8a",
+      "issuer": "00987406b7d98195de5fabad1496d4d41406e4b68080a7d3b83054349dbedac5aa",
+      "note": "Test asset issued while testing the tools; not a coin."
+    },
+    {
+      "kind": "direct-test",
+      "dir": "assets/demo-coin-1",
+      "note": "Demo coin 1, issued directly as a test, not against burns."
+    }
+  ]
+}

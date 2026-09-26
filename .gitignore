@@ -1,0 +1,34 @@
+# build output
+/target/
+**/target/
+node_modules/
+__pycache__/
+*.pyc
+
+# keys, seeds, wallets: never in this repo (the leak guard also refuses them)
+*.key
+*.pem
+*.seed
+*keypair*.json
+id.json
+wallet*.db
+wallet*.sqlite
+walletdb.sqlite*
+*.sqlite
+*.sqlite-journal
+.env
+.env.*
+!.env.example
+
+# Zcash proving parameters (large, fetched by script)
+*.params
+zcash-params/
+
+# private, machine-local: the leak guard's denylist lives here
+.private/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

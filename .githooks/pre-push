@@ -1,0 +1,3 @@
+#!/bin/sh
+# Before anything leaves this machine: the full history, identities, remotes, and the private denylist.
+exec python scripts/public_check.py --history --require-denylist

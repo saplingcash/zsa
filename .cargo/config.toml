@@ -1,0 +1,5 @@
+[target.'cfg(all())']
+rustflags = [
+    # Needed for QEDIT's ZSA versions of the librustzcash crates (as in zcash_tx_tool).
+    "--cfg", "zcash_unstable=\"nu7\"",
+]

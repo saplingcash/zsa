@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.mp4 binary
+# published metadata: exact bytes, never normalized
+assets/**/bundle.json -text
+assets/**/envelope.txt -text

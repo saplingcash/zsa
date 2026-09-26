@@ -1,0 +1,46 @@
+name: public-check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Guard tests
+        run: python -m unittest discover -s tests -v
+      - name: Write the private denylist from a repository secret (if set)
+        env:
+          DENYLIST: ${{ secrets.SAPLING_ZSA_DENYLIST }}
+        run: |
+          if [ -n "$DENYLIST" ]; then
+            mkdir -p .private && printf '%s\n' "$DENYLIST" > .private/denylist.txt
+          fi
+      - name: Scan full history and tree
+        # fails if the DENYLIST secret is missing; a merge commit by GitHub would fail the identity rule
+        run: python scripts/public_check.py --history --require-denylist
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sapling proving parameters (checked by SHA-256)
+        run: |
+          mkdir -p ~/.zcash-params && cd ~/.zcash-params
+          for f in sapling-spend.params sapling-output.params; do curl -sSfL -o $f https://download.z.cash/downloads/$f; done
+          sha256sum -c <<SUMS
+          8e48ffd23abb3a5fd9c5589204f32d9c31285a04b78096ba40a79b75677efc13  sapling-spend.params
+          2f0ebbcbb9bb0bcffe95a397e7eba89c29eb4dde6191c339db88570e3f3fb0e4  sapling-output.params
+          SUMS
+      - name: Test (the --cfg zcash_unstable="nu7" flag comes from .cargo/config.toml)
+        run: cargo test --release --locked
