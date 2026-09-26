@@ -66,7 +66,10 @@ $HOME/zsa/target/release/zsa audit
 - classifies each issuance by a listed issuer: valid, unbacked, duplicate, malformed, or unknown asset;
 - compares each twin's supply with the node's record.
 
-**Burn to twin, on Solana devnet and the ZSA test network:**
+**Burn to twin, on Solana devnet and the ZSA test network.** The burn and the issuance need the
+holder's devnet test keys and the issuer's key, which never leave the machines that hold them (the
+burn script reads a devnet payer key and the coin's mint key from local key files). The last step,
+`audit`, needs no key and can be run by anyone:
 
 ```
 # the holder's Zcash address (a test wallet)
