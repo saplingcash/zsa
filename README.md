@@ -19,6 +19,9 @@ The `zsa` command-line tool:
 | `address` | Prints a test wallet's unified address (test network, Orchard receiver): the address a burn memo names. |
 | `serve` | The issuer service: watches Solana for burns of every burn twin and issues each twin once, citing the burn ([RULES.md §5](docs/RULES.md)). |
 | `issue <coin-dir>` | Builds and submits an issuance on a ZSA test node, optionally with a burn citation. |
+| `holder balance / send / burn` | The holder's side: a test wallet's balance of a twin, sending it on to a fresh address, and burning part of it on Zcash (ZIP 226). |
+| `inspect <txid>` | Prints what anyone can read from the chain about a transaction, and what stays hidden. |
+| `pages` | Generates a static HTML page per twin (and an index) from an audit run. |
 | `check <coin-dir>` | Re-derives a twin's issuances from public data only: the metadata, the asset id, the transactions, the issuer's signature and the node's supply record. |
 | `audit` | Applies [docs/RULES.md](docs/RULES.md) to every twin in `registry/`, by scanning the chain. |
 | `local-vectors` | Issues deliberately bad twin issuances on a **local** ZSA node, runs `audit` on a throwaway registry, and checks each verdict. It refuses any node that is not on localhost. |
@@ -64,7 +67,21 @@ $HOME/zsa/target/release/zsa audit
 
 - scans every block from the earliest listed issuer height to the tip;
 - classifies each issuance by a listed issuer: valid, unbacked, duplicate, malformed, or unknown asset;
-- compares each twin's supply with the node's record.
+- counts every ZIP 226 burn of a twin, by anyone;
+- compares each twin's supply with the node's record: supply = issued − burned, and for a burn twin,
+  valid issuances − burned.
+
+**What is public, and when.** Measured on QEDIT's ZSA test network with `zsa inspect`:
+
+| Step | Public on chain | Hidden |
+|---|---|---|
+| Issuance (ZIP 227) | the issuer, the asset, the amount, the recipient address, the burn citation | nothing |
+| Holder sends the twin on to a fresh address (OrchardZSA transfer) | one nullifier and one note commitment per action | the asset, the amounts, the sender, the recipient |
+| Burn on Zcash (ZIP 226) | the asset and the amount burned | who burned it; the rest of the transaction |
+
+The issued notes are public, but their nullifiers need the holder's key, so the transfer that spends
+them cannot be linked to the issuance from the chain alone (timing aside). Explorers may show less
+than is public: the issuance details are in the raw transaction, which `zsa inspect` decodes.
 
 **Burn to twin, on Solana devnet and the ZSA test network.** The burn and the issuance need the
 holder's devnet test keys and the issuer's key, which never leave the machines that hold them (the
@@ -85,6 +102,20 @@ $HOME/zsa/target/release/zsa audit
 
 `audit` then shows the issuance as valid, backed by that burn: the signature, the slot and the
 address.
+
+**The holder's side**, with the holder's test key (account 0 is the address the burn memo named,
+account 1 a fresh address of the same wallet):
+
+```
+$HOME/zsa/target/release/zsa holder balance assets/demo-coin-2 --key <holder key file>
+$HOME/zsa/target/release/zsa holder send assets/demo-coin-2 --amount 10000000 --key <holder key file>
+$HOME/zsa/target/release/zsa holder burn assets/demo-coin-2 --amount 3000000 --key <holder key file>
+$HOME/zsa/target/release/zsa inspect <txid>
+```
+
+**A page per twin:** `zsa pages --out site` writes `site/index.html` and one page per twin: the asset,
+its supply, every issuance with the Solana burn behind it, every burn on Zcash, the audit result, the
+published metadata and the trust model.
 
 **Test vectors.** These run against a local ZSA node: QEDIT's Zebra in Docker (rootless works),
 regtest with ZSA active from height 1, RPC on `127.0.0.1:38232` only, and a fresh chain on every start.
@@ -107,7 +138,9 @@ The vectors cover:
 - an issuance by a key that is not listed (ignored);
 - a finalized twin;
 - an issuance after the key's range closed;
-- forged metadata.
+- forged metadata;
+- a burn on Zcash of more than was validly issued (flagged: a burn cannot make other units valid);
+- a burn on Zcash of an asset that is not a twin (not counted).
 
 Each must get exactly the verdict docs/RULES.md predicts, with no other failure.
 

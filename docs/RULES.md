@@ -70,7 +70,8 @@ A Zcash transaction is a **valid twin issuance** only if all of these hold:
 ## 3. What `audit` reports
 
 `audit` scans every block of the network, from the earliest `valid_from` of any listed issuer to the
-tip. It collects every issuance signed by a listed issuer.
+tip. It collects every issuance signed by a listed issuer, and every ZIP 226 burn of a listed twin,
+by anyone (a burn publishes the asset and the amount, not who burned).
 
 **Per twin:**
 
@@ -79,9 +80,11 @@ tip. It collects every issuance signed by a listed issuer.
     - **unbacked**: no citation, its amount differs, or the burn does not check out against Solana;
     - **duplicate**;
     - **malformed**;
-  - **the invariant:** supply on the node = the sum of valid issuances.
-- `direct-test` and `undisclosed-test` twins: the issuances are listed and summed, and must equal the
-  node's supply. The burn rules do not apply.
+  - **the invariant:** supply on the node = the sum of valid issuances − the sum of burns on Zcash;
+  - burns on Zcash of more than the sum of valid issuances are a failure: a burn cannot make other
+    units valid.
+- `direct-test` and `undisclosed-test` twins: the issuances and burns are listed and summed; issued −
+  burned must equal the node's supply. The Solana rules do not apply.
 
 **Across twins:**
 
@@ -98,7 +101,8 @@ The result is OK only if nothing above failed.
   not a test-network unified address with an Orchard receiver, or another coin's mint is never
   answered. The coins stay burned.
 - **Protect privacy at issuance.** ZIP 227 issuance is transparent. The recipient address and the
-  amount are public.
+  amount are public. Privacy starts when the holder sends the twin on to a fresh address: an
+  OrchardZSA transfer hides the asset, the amounts and the parties.
 - **Work across a test-network reset.** A reset erases the Zcash side. The same key and description
   give the same asset id on a new network, and burns on Solana still stand. So after a reset, twins can
   be re-issued from the burns and checked again from scratch.
