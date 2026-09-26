@@ -10,6 +10,8 @@
 mod address;
 mod audit;
 mod check;
+mod holder;
+mod inspect;
 mod issue;
 mod keys;
 mod metadata;
@@ -70,6 +72,25 @@ enum Cmd {
         #[arg(long)]
         once: bool,
     },
+    /// The holder's side of a twin: balances, sending on to a fresh address, burning on Zcash.
+    Holder {
+        #[command(subcommand)]
+        cmd: HolderCmd,
+        /// The holder's test key file (a BIP-39 phrase).
+        #[arg(long, global = true)]
+        key: Option<PathBuf>,
+        /// Wallet state (SQLite; kept out of version control).
+        #[arg(long, global = true, default_value = ".private/holder-wallet.sqlite")]
+        wallet_db: PathBuf,
+        #[arg(long, global = true, default_value = rpc::DEFAULT_NODE)]
+        node: String,
+    },
+    /// Print what anyone can read from the chain about a transaction, and what stays hidden.
+    Inspect {
+        txid: String,
+        #[arg(long, default_value = rpc::DEFAULT_NODE)]
+        node: String,
+    },
     /// Print the issuer (hex of [0x00] || ik) for a key file.
     Issuer {
         #[arg(long)]
@@ -113,6 +134,30 @@ enum Cmd {
         txid: Vec<String>,
         #[arg(long, default_value = rpc::DEFAULT_NODE)]
         node: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum HolderCmd {
+    /// The wallet's two addresses and its balance of a twin at each.
+    Balance { coin_dir: PathBuf },
+    /// Send units of a twin from account 0 (the memo's address) to account 1 (a fresh address).
+    Send {
+        coin_dir: PathBuf,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long, default_value_t = 0)]
+        from: usize,
+        #[arg(long, default_value_t = 1)]
+        to: usize,
+    },
+    /// Burn units of a twin on Zcash (ZIP 226).
+    Burn {
+        coin_dir: PathBuf,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long, default_value_t = 1)]
+        from: usize,
     },
 }
 
@@ -177,6 +222,44 @@ fn run(cli: Cli) -> Result<bool, String> {
                 interval: std::time::Duration::from_secs(interval),
                 once,
             })?;
+            Ok(true)
+        }
+        Cmd::Holder { cmd, key, wallet_db, node } => {
+            let key = key.ok_or("--key <holder key file> is required")?;
+            let mut w = holder::HolderWallet::open(&key, &wallet_db, &node)?;
+            let show = |w: &mut holder::HolderWallet, asset| -> Result<(), String> {
+                for a in 0..2 {
+                    println!("account {a}  {}  balance {}", w.address(a)?, w.balance(a, asset));
+                }
+                Ok(())
+            };
+            match cmd {
+                HolderCmd::Balance { coin_dir } => show(&mut w, holder::asset_of(&coin_dir)?)?,
+                HolderCmd::Send { coin_dir, amount, from, to } => {
+                    let asset = holder::asset_of(&coin_dir)?;
+                    if from > 1 || to > 1 || from == to {
+                        return Err("accounts are 0 and 1, and must differ".into());
+                    }
+                    let txid = w.send(from, to, amount, asset)?;
+                    println!("sent {amount} units from account {from} to account {to}: tx {txid}");
+                    show(&mut w, asset)?;
+                }
+                HolderCmd::Burn { coin_dir, amount, from } => {
+                    let asset = holder::asset_of(&coin_dir)?;
+                    if from > 1 {
+                        return Err("accounts are 0 and 1".into());
+                    }
+                    let txid = w.burn(from, amount, asset)?;
+                    println!("burned {amount} units on Zcash from account {from}: tx {txid}");
+                    show(&mut w, asset)?;
+                }
+            }
+            Ok(true)
+        }
+        Cmd::Inspect { txid, node } => {
+            for line in inspect::inspect(&txid, &rpc::Node::new(&node))? {
+                println!("{line}");
+            }
             Ok(true)
         }
         Cmd::Issuer { key } => {
