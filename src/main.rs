@@ -10,6 +10,8 @@
 mod address;
 mod audit;
 mod check;
+mod frost;
+mod frost_selftest;
 mod holder;
 mod inspect;
 mod issue;
@@ -20,6 +22,7 @@ mod rpc;
 mod scan;
 mod serve;
 mod solana;
+mod threshold;
 mod vectors;
 
 use std::fs;
@@ -135,6 +138,11 @@ enum Cmd {
     },
     /// Issue deliberately bad twin issuances on a LOCAL ZSA node and check audit's verdict on each.
     LocalVectors {
+        #[arg(long, default_value = "http://127.0.0.1:38232")]
+        node: String,
+    },
+    /// On a LOCAL ZSA node only: issue under a 2-of-3 FROST group key and check what the node accepts.
+    FrostSelftest {
         #[arg(long, default_value = "http://127.0.0.1:38232")]
         node: String,
     },
@@ -315,6 +323,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(report.passed())
         }
         Cmd::LocalVectors { node } => vectors::run(&node),
+        Cmd::FrostSelftest { node } => frost_selftest::run(&node),
         Cmd::Check { coin_dir, txid, node } => {
             let (envelope, bundle, issuer) = published(&coin_dir)?;
             let txids = if txid.is_empty() {

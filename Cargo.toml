@@ -24,6 +24,8 @@ zcash_encoding = "0.4.0"
 zcash_address = "0.12.0"
 zcash_transparent = { version = "0.8.0", features = ["transparent-inputs"] }
 zip32 = "0.2"
+# FROST(secp256k1, SHA-256) with BIP-340 signatures (Zcash Foundation), for the threshold issuer.
+frost-secp256k1-tr = "3.0.0"
 nonempty = "0.11.0"
 bip0039 = "0.12.0"
 diesel = { version = "2.3.9", features = ["sqlite"] }
