@@ -15,6 +15,7 @@ mod inspect;
 mod issue;
 mod keys;
 mod metadata;
+mod pages;
 mod rpc;
 mod scan;
 mod serve;
@@ -84,6 +85,17 @@ enum Cmd {
         wallet_db: PathBuf,
         #[arg(long, global = true, default_value = rpc::DEFAULT_NODE)]
         node: String,
+    },
+    /// Generate a static HTML page per twin (and an index) from an audit run.
+    Pages {
+        #[arg(long, default_value = "site")]
+        out: PathBuf,
+        #[arg(long, default_value = "qedit-zsa-test")]
+        network: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        node: Option<String>,
     },
     /// Print what anyone can read from the chain about a transaction, and what stays hidden.
     Inspect {
@@ -254,6 +266,14 @@ fn run(cli: Cli) -> Result<bool, String> {
                     show(&mut w, asset)?;
                 }
             }
+            Ok(true)
+        }
+        Cmd::Pages { out, network, root, node } => {
+            let result = audit::audit(&root, &network, node.as_deref(), false);
+            for f in pages::write(&root, &result, &out)? {
+                println!("{}", out.join(f).display());
+            }
+            println!("audit: {}", if result.report.passed() { "OK" } else { "FAIL" });
             Ok(true)
         }
         Cmd::Inspect { txid, node } => {

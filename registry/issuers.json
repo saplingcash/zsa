@@ -7,7 +7,8 @@
       "genesis": "f41f61ddf9610ae40f519ad2e9e543e065ef0357eeecf5a4cc08a765d9505756",
       "solana_rpc": {
         "devnet": "https://api.devnet.solana.com"
-      }
+      },
+      "explorer_tx": "https://cipherscan.test-zsa.org/tx/{txid}"
     }
   },
   "issuers": [

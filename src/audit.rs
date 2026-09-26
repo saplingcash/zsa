@@ -41,6 +41,9 @@ pub struct Network {
     /// Solana RPC per cluster (e.g. "devnet"), for the burn twins' Solana-side checks.
     #[serde(default)]
     pub solana_rpc: BTreeMap<String, String>,
+    /// A transaction link on a public explorer, with `{txid}` (optional; used by `pages`).
+    #[serde(default)]
+    pub explorer_tx: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,6 +123,7 @@ pub struct TwinFindings {
 pub struct AuditResult {
     pub report: Report,
     pub network: String,
+    pub explorer_tx: Option<String>,
     pub node: String,
     pub scanned: Option<(u64, u64)>,
     pub twins: Vec<TwinFindings>,
@@ -200,6 +204,7 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>, skip_
     let mut out = AuditResult {
         report: Report::new(),
         network: network_name.to_string(),
+        explorer_tx: None,
         node: String::new(),
         scanned: None,
         twins: Vec::new(),
@@ -225,6 +230,7 @@ fn run(out: &mut AuditResult, root: &Path, network_name: &str, node_override: Op
     };
     let node = Node::new(node_override.unwrap_or(&network.rpc));
     out.node = node.url().to_string();
+    out.explorer_tx = network.explorer_tx.clone();
 
     // The network, by its genesis hash.
     match node.block_hash(0) {
