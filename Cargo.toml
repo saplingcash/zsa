@@ -21,6 +21,7 @@ zcash_primitives = { version = "0.28.0", features = ["transparent-inputs", "non-
 zcash_protocol = "0.9.0"
 zcash_proofs = "0.28.0"
 zcash_encoding = "0.4.0"
+zcash_address = "0.12.0"
 zcash_transparent = { version = "0.8.0", features = ["transparent-inputs"] }
 zip32 = "0.2"
 nonempty = "0.11.0"

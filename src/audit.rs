@@ -3,6 +3,7 @@
 //! Scans every block of the network from the earliest `valid_from` of a listed issuer to the tip,
 //! classifies every issuance signed by a listed issuer, and checks each twin's supply against the
 //! node's own record. Issuances by keys that are not listed are other people's and are ignored.
+//! For burn twins, every cited burn is fetched from Solana (finalized) and checked (RULES §2).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -14,7 +15,8 @@ use serde::Deserialize;
 use zcash_primitives::transaction::Transaction;
 
 use crate::check::Report;
-use crate::metadata;
+use crate::metadata::{self, TwinOf};
+use crate::solana::{self, SolanaRpc};
 use crate::rpc::Node;
 use crate::scan::{self, Citation};
 
@@ -33,6 +35,9 @@ pub struct Network {
     pub description: String,
     pub rpc: String,
     pub genesis: String,
+    /// Solana RPC per cluster (e.g. "devnet"), for the burn twins' Solana-side checks.
+    #[serde(default)]
+    pub solana_rpc: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,7 +73,8 @@ pub struct TwinEntry {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Status {
-    Valid,
+    /// Valid; the string says what backs it (the Solana burn, or a direct test issuance).
+    Valid(String),
     Unbacked(String),
     Duplicate,
     Malformed(String),
@@ -83,6 +89,7 @@ struct Seen {
 
 struct Twin {
     entry: TwinEntry,
+    twin_of: Option<TwinOf>,
     label: String,
     asset_hex: String,
     seen: Vec<Seen>,
@@ -94,6 +101,7 @@ struct Shape {
     amount: u64,
     finalized: bool,
     citation: Option<Citation>,
+    recipient: [u8; 43],
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
@@ -134,10 +142,34 @@ fn shape(tx: &Transaction) -> Result<Shape, String> {
         amount: value_notes[0].value().inner(),
         finalized: action.is_finalized(),
         citation,
+        recipient: value_notes[0].recipient().to_raw_address_bytes(),
     })
 }
 
-pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>) -> Report {
+/// RULES §2 against Solana: the cited burn exists (finalized), burns this twin's mint, exactly the
+/// cited amount, carries one sapling-twin memo, and the issued note goes to the memo's address.
+fn check_burn(c: &Citation, s: &Shape, twin: &TwinOf, rpc: &SolanaRpc) -> Status {
+    let sig = c.signature_b58();
+    let tx = match rpc.transaction(&sig) {
+        Ok(Some(tx)) => tx,
+        Ok(None) => return Status::Unbacked(format!("burn {sig} not found (or not finalized) on Solana {}", twin.cluster)),
+        Err(e) => return Status::Unbacked(format!("burn {sig}: {e}")),
+    };
+    let burn = match solana::parse_burn(&sig, &tx, Some(&twin.mint)) {
+        Ok(b) => b,
+        Err(e) => return Status::Unbacked(format!("burn {sig}: {e}")),
+    };
+    if burn.amount != c.amount {
+        return Status::Unbacked(format!("burn {sig} burned {} but the citation says {}", burn.amount, c.amount));
+    }
+    if burn.orchard_receiver != s.recipient {
+        return Status::Unbacked(format!("burn {sig}: the issued note does not go to the memo's address"));
+    }
+    Status::Valid(format!("burn {sig} on Solana {}, slot {}, to {}", twin.cluster, burn.slot, burn.zcash_address))
+}
+
+/// `skip_solana`: do not fetch burns from Solana (local test vectors; the lines say so).
+pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>, skip_solana: bool) -> Report {
     let mut r = Report::new();
     let loaded = (|| -> Result<(IssuersFile, TwinsFile), String> {
         Ok((read_json(&root.join("registry/issuers.json"))?, read_json(&root.join("registry/twins.json"))?))
@@ -188,7 +220,9 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>) -> Re
     let mut twins: Vec<Twin> = Vec::new();
     for entry in &twins_file.twins {
         let resolved = match (entry.kind.as_str(), &entry.dir, &entry.asset, &entry.issuer) {
-            ("burn" | "direct-test", Some(dir), None, None) => twin_with_metadata(root, dir, &listed, network_name),
+            ("burn" | "direct-test", Some(dir), None, None) => {
+                twin_with_metadata(root, dir, &listed, network_name).map(|(l, a, w, t)| (l, a, w, Some(t)))
+            }
             ("undisclosed-test", None, Some(asset), Some(issuer)) => {
                 let issuer = issuer.to_lowercase();
                 if !listed.contains_key(&issuer) {
@@ -196,12 +230,12 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>) -> Re
                 } else if asset.len() != 64 || hex::decode(asset).is_err() {
                     Err(format!("undisclosed asset {asset}: not a 32-byte hex asset base"))
                 } else {
-                    Ok((format!("undisclosed test asset {}", &asset[..16]), asset.to_lowercase(), "listed by asset id only; description not published".to_string()))
+                    Ok((format!("undisclosed test asset {}", &asset[..16]), asset.to_lowercase(), "listed by asset id only; description not published".to_string(), None))
                 }
             }
             (kind, ..) => Err(format!("twins.json: an entry of kind {kind} has the wrong fields")),
         };
-        let (label, asset_hex, what) = match resolved {
+        let (label, asset_hex, what, twin_of) = match resolved {
             Ok(x) => x,
             Err(e) => {
                 r.fail(e);
@@ -213,7 +247,14 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>) -> Re
             continue;
         }
         r.ok(format!("{label} ({}): {what}; asset {asset_hex}", entry.kind));
-        twins.push(Twin { entry: entry.clone(), label, asset_hex, seen: Vec::new() });
+        if entry.kind == "burn" && !skip_solana {
+            let cluster = twin_of.as_ref().map(|t| t.cluster.as_str()).unwrap_or("");
+            if !network.solana_rpc.contains_key(cluster) {
+                r.fail(format!("{label}: no Solana RPC for cluster {cluster} in registry/issuers.json"));
+                continue;
+            }
+        }
+        twins.push(Twin { entry: entry.clone(), twin_of, label, asset_hex, seen: Vec::new() });
     }
     let by_asset: HashMap<String, usize> = twins.iter().enumerate().map(|(i, t)| (t.asset_hex.clone(), i)).collect();
 
@@ -226,7 +267,7 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>) -> Re
             return r;
         }
     };
-    let mut cited: HashSet<[u8; 32]> = HashSet::new();
+    let mut cited: HashSet<[u8; 64]> = HashSet::new();
     let (mut ours, mut others) = (0usize, 0usize);
     for height in from..=tip {
         if (height - from) % 200 == 0 {
@@ -274,7 +315,7 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>) -> Re
                 Status::Malformed("finalized (twins stay open)".into())
             } else if twin.entry.kind != "burn" {
                 match s.citation {
-                    None => Status::Valid,
+                    None => Status::Valid("direct test issuance".into()),
                     Some(_) => Status::Malformed("a test twin carries a burn citation".into()),
                 }
             } else {
@@ -283,8 +324,20 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>) -> Re
                     Some(c) if c.amount != s.amount => {
                         Status::Unbacked(format!("citation amount {} but {} issued", c.amount, s.amount))
                     }
-                    Some(c) if !cited.insert(c.burn_sig_sha256) => Status::Duplicate,
-                    Some(_) => Status::Valid,
+                    Some(c) => {
+                        // Only a burn that checks out on Solana is answered; the first such issuance wins.
+                        let backed = if skip_solana {
+                            Status::Valid("Solana side not checked".into())
+                        } else {
+                            let twin_of = twin.twin_of.as_ref().expect("burn twins have metadata");
+                            let rpc = SolanaRpc::new(&network.solana_rpc[&twin_of.cluster]);
+                            check_burn(&c, &s, twin_of, &rpc)
+                        };
+                        match backed {
+                            Status::Valid(_) if !cited.insert(c.burn_signature) => Status::Duplicate,
+                            other => other,
+                        }
+                    }
                 }
             };
             twin.seen.push(Seen { height, txid, amount: s.amount, status });
@@ -297,11 +350,11 @@ pub fn audit(root: &Path, network_name: &str, node_override: Option<&str>) -> Re
     // Per twin.
     for t in &twins {
         let total: u64 = t.seen.iter().map(|s| s.amount).sum();
-        let valid: u64 = t.seen.iter().filter(|s| s.status == Status::Valid).map(|s| s.amount).sum();
+        let valid: u64 = t.seen.iter().filter(|s| matches!(s.status, Status::Valid(_))).map(|s| s.amount).sum();
         for s in &t.seen {
             let line = format!("{}: tx {} (height {}) {} units", t.label, s.txid, s.height, s.amount);
             match &s.status {
-                Status::Valid => r.ok(format!("{line}: valid")),
+                Status::Valid(why) => r.ok(format!("{line}: valid ({why})")),
                 Status::Unbacked(why) => r.fail(format!("{line}: UNBACKED ({why})")),
                 Status::Duplicate => r.fail(format!("{line}: DUPLICATE (cites a burn already answered)")),
                 Status::Malformed(why) => r.fail(format!("{line}: MALFORMED ({why})")),
@@ -335,13 +388,14 @@ fn twin_with_metadata(
     dir_name: &str,
     listed: &HashMap<String, &IssuerEntry>,
     network_name: &str,
-) -> Result<(String, String, String), String> {
+) -> Result<(String, String, String, TwinOf), String> {
     let dir = root.join(dir_name);
     let read = |f: &str| fs::read(dir.join(f)).map_err(|e| format!("{dir_name}/{f}: {e}"));
     let envelope = String::from_utf8(read("envelope.txt")?).map_err(|_| format!("{dir_name}: envelope is not UTF-8"))?;
     let bundle = read("bundle.json")?;
     let issuer = String::from_utf8(read("issuer.txt")?).map_err(|_| "issuer.txt")?.trim().to_lowercase();
-    metadata::verify_published(&envelope, &bundle).map_err(|p| format!("{dir_name}: metadata: {}", p.join("; ")))?;
+    let twin_of = metadata::verify_published(&envelope, &bundle)
+        .map_err(|p| format!("{dir_name}: metadata: {}", p.join("; ")))?;
     if !listed.contains_key(&issuer) {
         return Err(format!("{dir_name}: issuer {issuer} is not listed for {network_name}"));
     }
@@ -350,5 +404,5 @@ fn twin_with_metadata(
         .and_then(|b| IssueValidatingKey::decode(&b).ok())
         .ok_or_else(|| format!("{dir_name}: issuer does not decode"))?;
     let asset = AssetBase::custom(&AssetId::new_v0(&ik, &metadata::asset_desc_hash(envelope.as_bytes())));
-    Ok((dir_name.to_string(), hex::encode(asset.to_bytes()), "metadata verifies".to_string()))
+    Ok((dir_name.to_string(), hex::encode(asset.to_bytes()), "metadata verifies".to_string(), twin_of))
 }

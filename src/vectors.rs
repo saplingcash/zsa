@@ -107,7 +107,7 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
     let cite = |n: u8, amount: u64| Citation::for_burn(&sig(n), amount);
 
     go(&mut cases, "valid burn issuance", &k1, &burn.envelope, 100,
-       BuildOptions { citation: Some(cite(1, 100)?), ..Default::default() }, Some(": valid"))?;
+       BuildOptions { citation: Some(cite(1, 100)?), ..Default::default() }, Some(": valid (Solana side not checked)"))?;
     go(&mut cases, "same burn cited again", &k1, &burn.envelope, 100,
        BuildOptions { citation: Some(cite(1, 100)?), ..Default::default() }, Some("DUPLICATE"))?;
     go(&mut cases, "burn twin without a citation", &k1, &burn.envelope, 7,
@@ -146,7 +146,7 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
     fs::write(reg.join("issuers.json"), serde_json::to_vec_pretty(&issuers).unwrap()).map_err(|e| e.to_string())?;
     fs::write(reg.join("twins.json"), serde_json::to_vec_pretty(&twins).unwrap()).map_err(|e| e.to_string())?;
 
-    let report = audit::audit(root, "local", None);
+    let report = audit::audit(root, "local", None, true);
     println!("--- audit of the local vectors ---");
     for (ok, line) in &report.lines {
         println!("{} {line}", if *ok { "OK  " } else { "FAIL" });
@@ -162,7 +162,7 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
         let lines: Vec<&(bool, String)> = report.lines.iter().filter(|(_, l)| l.contains(&c.txid)).collect();
         match c.expect {
             Some(want) => check(
-                lines.len() == 1 && lines[0].1.contains(want) && lines[0].0 == (want == ": valid"),
+                lines.len() == 1 && lines[0].1.contains(want) && lines[0].0 == want.starts_with(": valid"),
                 format!("{} (height {}): \"{want}\"", c.name, c.height),
             ),
             None => check(lines.is_empty(), format!("{} (height {}): ignored", c.name, c.height)),

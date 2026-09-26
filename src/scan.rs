@@ -2,7 +2,6 @@
 
 use std::io::Cursor;
 
-use sha2::{Digest, Sha256};
 use zcash_encoding::CompactSize;
 use zcash_primitives::block::BlockHeader;
 use zcash_primitives::transaction::Transaction;
@@ -10,30 +9,35 @@ use zcash_protocol::consensus::BranchId;
 
 pub const CITATION_TAG: &[u8; 4] = b"SPLT";
 pub const CITATION_VERSION: u8 = 1;
-pub const CITATION_LEN: usize = 4 + 1 + 32 + 8;
+pub const CITATION_LEN: usize = 4 + 1 + 64 + 8;
 
-/// A burn citation: which Solana burn an issuance answers, and for how much.
+/// A burn citation: the Solana burn an issuance answers (its full signature), and for how much.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Citation {
-    pub burn_sig_sha256: [u8; 32],
+    pub burn_signature: [u8; 64],
     pub amount: u64,
 }
 
 impl Citation {
     /// From a Solana transaction signature (base58, 64 bytes) and the burned amount.
     pub fn for_burn(signature_b58: &str, amount: u64) -> Result<Self, String> {
-        let sig = crate::metadata::base58_decode(signature_b58)
-            .filter(|b| b.len() == 64)
+        let sig: [u8; 64] = crate::metadata::base58_decode(signature_b58)
+            .and_then(|b| b.try_into().ok())
             .ok_or_else(|| format!("{signature_b58} is not a 64-byte base58 Solana signature"))?;
-        Ok(Self { burn_sig_sha256: Sha256::digest(&sig).into(), amount })
+        Ok(Self { burn_signature: sig, amount })
+    }
+
+    /// The cited Solana signature, base58.
+    pub fn signature_b58(&self) -> String {
+        crate::metadata::base58_encode(&self.burn_signature)
     }
 
     pub fn encode(&self) -> [u8; CITATION_LEN] {
         let mut out = [0u8; CITATION_LEN];
         out[..4].copy_from_slice(CITATION_TAG);
         out[4] = CITATION_VERSION;
-        out[5..37].copy_from_slice(&self.burn_sig_sha256);
-        out[37..].copy_from_slice(&self.amount.to_le_bytes());
+        out[5..69].copy_from_slice(&self.burn_signature);
+        out[69..].copy_from_slice(&self.amount.to_le_bytes());
         out
     }
 
@@ -42,8 +46,8 @@ impl Citation {
             return None;
         }
         Some(Self {
-            burn_sig_sha256: data[5..37].try_into().ok()?,
-            amount: u64::from_le_bytes(data[37..].try_into().ok()?),
+            burn_signature: data[5..69].try_into().ok()?,
+            amount: u64::from_le_bytes(data[69..].try_into().ok()?),
         })
     }
 }
@@ -98,13 +102,15 @@ mod tests {
         let sig = crate::metadata::base58_encode(&[7u8; 64]);
         let c = Citation::for_burn(&sig, 1_000_000).unwrap();
         let bytes = c.encode();
-        assert_eq!(bytes.len(), 45);
+        assert_eq!(bytes.len(), 77);
+        assert!(bytes.len() <= 80, "OP_RETURN relay limit");
+        assert_eq!(c.signature_b58(), sig);
         assert_eq!(&bytes[..5], b"SPLT\x01");
         assert_eq!(Citation::decode(&bytes), Some(c));
         let mut wrong = bytes;
         wrong[4] = 2;
         assert_eq!(Citation::decode(&wrong), None);
-        assert_eq!(Citation::decode(&bytes[..44]), None);
+        assert_eq!(Citation::decode(&bytes[..76]), None);
         assert!(Citation::for_burn("11111111111111111111111111111111", 1).is_err());
     }
 

@@ -7,6 +7,7 @@
 //!   issuer.txt      the published issuer key, hex of [0x00] || ik
 //!   issuances.txt   txids of the twin's issuances, one per line
 
+mod address;
 mod audit;
 mod check;
 mod issue;
@@ -14,6 +15,7 @@ mod keys;
 mod metadata;
 mod rpc;
 mod scan;
+mod solana;
 mod vectors;
 
 use std::fs;
@@ -155,7 +157,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Cmd::Audit { network, root, node } => {
-            let report = audit::audit(&root, &network, node.as_deref());
+            let report = audit::audit(&root, &network, node.as_deref(), false);
             for (ok, line) in &report.lines {
                 println!("{} {line}", if *ok { "OK  " } else { "FAIL" });
             }
