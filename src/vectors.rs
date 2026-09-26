@@ -146,7 +146,7 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
     fs::write(reg.join("issuers.json"), serde_json::to_vec_pretty(&issuers).unwrap()).map_err(|e| e.to_string())?;
     fs::write(reg.join("twins.json"), serde_json::to_vec_pretty(&twins).unwrap()).map_err(|e| e.to_string())?;
 
-    let report = audit::audit(root, "local", None, true);
+    let report = audit::audit(root, "local", None, true).report;
     println!("--- audit of the local vectors ---");
     for (ok, line) in &report.lines {
         println!("{} {line}", if *ok { "OK  " } else { "FAIL" });
@@ -170,7 +170,7 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
     }
     let has = |ok: bool, needle: &str| report.lines.iter().any(|(o, l)| *o == ok && l.contains(needle));
     check(has(false, &format!("{}: metadata: bundle bytes do not hash", forged.dir)), "forged metadata is refused".into());
-    check(has(false, &format!("{}: supply 271 but only 100 is valid", burn.dir)), "burn twin: supply 271, only 100 valid".into());
+    check(has(false, &format!("{}: supply 271 but valid issuances 100 - burned 0 differ", burn.dir)), "burn twin: supply 271, only 100 valid".into());
     check(has(false, &format!("{}: FINALIZED", test.dir)), "test twin: finalized is a failure".into());
     check(has(true, "1 by other keys"), "the unlisted key's issuance is counted as someone else's".into());
     check(!report.passed(), "audit result is FAIL".into());
@@ -183,8 +183,8 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
         .filter(|(ok, l)| {
             !ok && !known.iter().any(|t| l.contains(t))
                 && !l.starts_with(&format!("{}: metadata", forged.dir))
-                && !l.contains("only 100 is valid")
-                && !l.contains(&format!("{}: supply 8 but only 0 is valid", test.dir))
+                && !l.contains("valid issuances 100 - burned 0 differ")
+                && !l.contains(&format!("{}: supply 8 but valid issuances 0 - burned 0 differ", test.dir))
                 && !l.contains(&format!("{}: FINALIZED", test.dir))
         })
         .map(|(_, l)| l)

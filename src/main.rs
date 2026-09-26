@@ -204,7 +204,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Cmd::Audit { network, root, node } => {
-            let report = audit::audit(&root, &network, node.as_deref(), false);
+            let report = audit::audit(&root, &network, node.as_deref(), false).report;
             for (ok, line) in &report.lines {
                 println!("{} {line}", if *ok { "OK  " } else { "FAIL" });
             }

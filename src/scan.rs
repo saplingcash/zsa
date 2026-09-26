@@ -4,7 +4,8 @@ use std::io::Cursor;
 
 use zcash_encoding::CompactSize;
 use zcash_primitives::block::BlockHeader;
-use zcash_primitives::transaction::Transaction;
+use orchard::note::AssetBase;
+use zcash_primitives::transaction::{OrchardBundle, Transaction};
 use zcash_protocol::consensus::BranchId;
 
 pub const CITATION_TAG: &[u8; 4] = b"SPLT";
@@ -75,22 +76,32 @@ fn parse_single_push(rest: &[u8]) -> Option<Vec<u8>> {
     (data.len() == len).then(|| data.to_vec())
 }
 
-/// Every transaction of a raw block that carries an issuance bundle, with its position.
-pub fn issuances_in_block(raw: &[u8]) -> Result<Vec<(usize, Transaction)>, String> {
+/// Every transaction of a raw block, with its position.
+pub fn transactions_in_block(raw: &[u8]) -> Result<Vec<(usize, Transaction)>, String> {
     let mut r = Cursor::new(raw);
     BlockHeader::read(&mut r).map_err(|e| format!("block header: {e}"))?;
     let n = CompactSize::read(&mut r).map_err(|e| format!("tx count: {e}"))?;
-    let mut found = Vec::new();
+    let mut all = Vec::new();
     for i in 0..n as usize {
-        let tx = Transaction::read(&mut r, BranchId::Nu6).map_err(|e| format!("tx {i}: {e}"))?;
-        if tx.issue_bundle().is_some() {
-            found.push((i, tx));
-        }
+        all.push((i, Transaction::read(&mut r, BranchId::Nu6).map_err(|e| format!("tx {i}: {e}"))?));
     }
     if r.position() as usize != raw.len() {
         return Err("trailing bytes after the last transaction".into());
     }
-    Ok(found)
+    Ok(all)
+}
+
+/// Every transaction of a raw block that carries an issuance bundle, with its position.
+pub fn issuances_in_block(raw: &[u8]) -> Result<Vec<(usize, Transaction)>, String> {
+    Ok(transactions_in_block(raw)?.into_iter().filter(|(_, tx)| tx.issue_bundle().is_some()).collect())
+}
+
+/// The ZIP 226 burns of a transaction: public (asset base, amount) pairs.
+pub fn zsa_burns(tx: &Transaction) -> Vec<(AssetBase, u64)> {
+    match tx.orchard_bundle() {
+        Some(OrchardBundle::OrchardZSA(b)) => b.burn().iter().map(|(a, v)| (*a, v.inner())).collect(),
+        _ => Vec::new(),
+    }
 }
 
 #[cfg(test)]
