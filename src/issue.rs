@@ -53,19 +53,30 @@ pub fn test_address(phrase: &str, account: u32) -> Result<Address, String> {
     Ok(FullViewingKey::from(&sk).address_at(0u32, Scope::External))
 }
 
+/// What goes into an issuance besides the asset and the amount.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuildOptions {
+    /// The burn citation (docs/RULES.md §2.7).
+    pub citation: Option<Citation>,
+    /// Set the finalize flag. Twins never do; the local test vectors use it.
+    pub finalize: bool,
+    /// Allow a citation whose amount differs from the issued amount. Local test vectors only.
+    pub allow_citation_mismatch: bool,
+}
+
 pub fn build(
     phrase: &str,
     asset_desc: &str,
     amount: u64,
     recipient: Address,
-    citation: Option<Citation>,
+    opts: &BuildOptions,
     node: &Node,
 ) -> Result<(Transaction, AssetBase, bool), String> {
     if amount == 0 {
         return Err("amount must be above zero".into());
     }
-    if let Some(c) = citation {
-        if c.amount != amount {
+    if let Some(c) = opts.citation {
+        if c.amount != amount && !opts.allow_citation_mismatch {
             return Err(format!("citation amount {} differs from the amount {amount}", c.amount));
         }
     }
@@ -91,6 +102,9 @@ pub fn build(
         first,
     )
     .map_err(|e| format!("issuance bundle: {e:?}"))?;
+    if opts.finalize {
+        b.finalize_asset::<FeeError>(&desc_hash).map_err(|e| format!("finalize: {e:?}"))?;
+    }
     let own = test_address(phrase, 0)?;
     let ovk = {
         let seed = Mnemonic::<bip0039::English>::from_phrase(phrase).map_err(|e| e.to_string())?.to_seed("");
@@ -99,7 +113,7 @@ pub fn build(
     };
     b.add_orchard_output::<FeeError>(Some(ovk), own, Zatoshis::ZERO, AssetBase::zatoshi(), MemoBytes::empty())
         .map_err(|e| format!("orchard output: {e:?}"))?;
-    if let Some(c) = citation {
+    if let Some(c) = opts.citation {
         b.add_transparent_null_data_output::<FeeError>(&c.encode())
             .map_err(|e| format!("citation output: {e:?}"))?;
     }
@@ -134,10 +148,10 @@ pub fn issue(
     let node = Node::new(node_url);
     // Test issuances go to account 1 of the same test wallet. (A burn twin goes to the burn memo's address.)
     let recipient = test_address(&phrase, 1)?;
-    let (tx, asset, first) = build(&phrase, asset_desc, amount, recipient, citation, &node)?;
+    let opts = BuildOptions { citation, ..Default::default() };
+    let (tx, asset, first) = build(&phrase, asset_desc, amount, recipient, &opts, &node)?;
     let txid = tx.txid().to_string();
-    let mut rpc = ReqwestRpcClient::new(node_url.to_string());
-    let (height, _) = mine_block(&mut rpc, vec![tx]).map_err(|e| format!("submitting the block: {e}"))?;
+    let height = submit(node_url, tx)?;
     Ok(Issued {
         txid,
         height,
@@ -145,4 +159,18 @@ pub fn issue(
         recipient_hex: hex::encode(recipient.to_raw_address_bytes()),
         first_issuance: first,
     })
+}
+
+/// Put a transaction in a new block on a ZSA test node (anyone may produce blocks there).
+pub fn submit(node_url: &str, tx: Transaction) -> Result<u32, String> {
+    let mut rpc = ReqwestRpcClient::new(node_url.to_string());
+    let (height, _) = mine_block(&mut rpc, vec![tx]).map_err(|e| format!("submitting the block: {e}"))?;
+    Ok(height)
+}
+
+/// Produce an empty block (a fresh local node starts at genesis, before the Orchard tree exists).
+pub fn empty_block(node_url: &str) -> Result<u32, String> {
+    let mut rpc = ReqwestRpcClient::new(node_url.to_string());
+    let (height, _) = mine_block(&mut rpc, vec![]).map_err(|e| format!("submitting an empty block: {e}"))?;
+    Ok(height)
 }

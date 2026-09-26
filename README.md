@@ -19,6 +19,7 @@ The `zsa` command-line tool:
 | `issue <coin-dir>` | Builds and submits an issuance on a ZSA test node, optionally with a burn citation. |
 | `check <coin-dir>` | Re-derives a twin's issuances from public data only: the metadata, the asset id, the transactions, the issuer's signature and the node's supply record. |
 | `audit` | Applies [docs/RULES.md](docs/RULES.md) to every twin in `registry/`, by scanning the chain. |
+| `local-vectors` | Issues deliberately bad twin issuances on a **local** ZSA node, runs `audit` on a throwaway registry, and checks each verdict. It refuses any node that is not on localhost. |
 
 The published twins are in `assets/`, and the listed issuer keys are in `registry/`.
 
@@ -63,6 +64,31 @@ $HOME/zsa/target/release/zsa audit
 - classifies each issuance by a listed issuer: valid, unbacked, duplicate, malformed, or unknown asset;
 - compares each twin's supply with the node's record.
 
+**Test vectors.** These run against a local ZSA node: QEDIT's Zebra in Docker (rootless works),
+regtest with ZSA active from height 1, RPC on `127.0.0.1:38232` only, and a fresh chain on every start.
+
+```
+sh scripts/local-node.sh build      # clones QEDIT's Zebra at the pinned commit and builds the image
+sh scripts/local-node.sh start
+$HOME/zsa/target/release/zsa local-vectors
+sh scripts/local-node.sh stop
+```
+
+The vectors cover:
+
+- a valid burn issuance;
+- the same burn cited twice;
+- a burn twin with no citation;
+- a citation whose amount differs;
+- a test twin carrying a citation;
+- an asset not in the registry;
+- an issuance by a key that is not listed (ignored);
+- a finalized twin;
+- an issuance after the key's range closed;
+- forged metadata.
+
+Each must get exactly the verdict docs/RULES.md predicts, with no other failure.
+
 **Limits:**
 
 - The asset base, note parsing and the signature scheme come from QEDIT's crates. The tools are not an
@@ -81,6 +107,7 @@ docs/RULES.md            what counts as a valid twin issuance
 docs/METADATA.md         the metadata format (Cachet v1) and the Solana link
 solana/                  Solana devnet helpers (test mints); devnet/localnet only
 scripts/cargo-wsl.sh     build with the output on the Linux filesystem
+scripts/local-node.sh    a local ZSA node (QEDIT's Zebra) in Docker, for the test vectors
 scripts/public_check.py  leak guard, run in CI and in the git hooks
 tests/                   tests for the leak guard
 ```

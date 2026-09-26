@@ -14,6 +14,7 @@ mod keys;
 mod metadata;
 mod rpc;
 mod scan;
+mod vectors;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -60,9 +61,17 @@ enum Cmd {
     Audit {
         #[arg(long, default_value = "qedit-zsa-test")]
         network: String,
+        /// The directory holding registry/ and assets/ (default: the current directory).
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
         /// Override the network's RPC URL from registry/issuers.json (e.g. a local node).
         #[arg(long)]
         node: Option<String>,
+    },
+    /// Issue deliberately bad twin issuances on a LOCAL ZSA node and check audit's verdict on each.
+    LocalVectors {
+        #[arg(long, default_value = "http://127.0.0.1:38232")]
+        node: String,
     },
     /// Check a twin from public data only: metadata, issuer, signatures, asset, node supply.
     Check {
@@ -145,14 +154,15 @@ fn run(cli: Cli) -> Result<bool, String> {
             println!("first issuance: {}", issued.first_issuance);
             Ok(true)
         }
-        Cmd::Audit { network, node } => {
-            let report = audit::audit(Path::new("."), &network, node.as_deref());
+        Cmd::Audit { network, root, node } => {
+            let report = audit::audit(&root, &network, node.as_deref());
             for (ok, line) in &report.lines {
                 println!("{} {line}", if *ok { "OK  " } else { "FAIL" });
             }
             println!("{}", if report.passed() { "RESULT: OK" } else { "RESULT: FAIL" });
             Ok(report.passed())
         }
+        Cmd::LocalVectors { node } => vectors::run(&node),
         Cmd::Check { coin_dir, txid, node } => {
             let (envelope, bundle, issuer) = published(&coin_dir)?;
             let txids = if txid.is_empty() {
