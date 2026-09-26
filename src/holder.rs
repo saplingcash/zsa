@@ -56,13 +56,17 @@ pub fn asset_of(coin_dir: &Path) -> Result<AssetBase, String> {
 impl HolderWallet {
     /// Open (or create) the wallet state and sync it with the node.
     pub fn open(key: &Path, wallet_db: &Path, node_url: &str) -> Result<Self, String> {
-        let phrase = keys::read_phrase(key)?;
+        Self::open_with_phrase(&keys::read_phrase(key)?, wallet_db, node_url)
+    }
+
+    /// As `open`, with the phrase itself (the local test vectors keep their keys in memory).
+    pub fn open_with_phrase(phrase: &str, wallet_db: &Path, node_url: &str) -> Result<Self, String> {
         if let Some(dir) = wallet_db.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
         let db_path = wallet_db.to_string_lossy().to_string();
         let mut conn = guarded("opening the wallet database", || db::establish_connection(&db_path))?;
-        let mut wallet = Wallet::new(&mut conn, &phrase);
+        let mut wallet = Wallet::new(&mut conn, phrase);
         let accounts = [wallet.address_for_account(0, Scope::External), wallet.address_for_account(1, Scope::External)];
         let mut rpc = ReqwestRpcClient::new(node_url.to_string());
         eprintln!("syncing the wallet with {node_url} ...");

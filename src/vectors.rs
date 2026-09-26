@@ -126,6 +126,18 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
     go(&mut cases, "after the key's range closed", &k1, &burn.envelope, 4,
        BuildOptions { citation: Some(cite(4, 4)?), ..Default::default() }, Some("outside the key's validity range"))?;
 
+    // Burns on Zcash (ZIP 226) by the holder of the issued notes (account 1 of the vector key):
+    // 150 units of the burn twin, of which only 100 were validly issued (audit must flag it: a burn
+    // cannot make unbacked units valid), and 5 units of the unlisted asset (not a twin: not counted).
+    let wallet_db = root.join("holder-wallet.sqlite");
+    let mut holder = crate::holder::HolderWallet::open_with_phrase(&k1, &wallet_db, node_url)?;
+    let burn_asset = crate::holder::asset_of(&root.join(&burn.dir))?;
+    let unlisted_asset = crate::holder::asset_of(&root.join(&unlisted.dir))?;
+    let burn_tx = holder.burn(1, 150, burn_asset)?;
+    eprintln!("burned 150 units of the burn twin on Zcash: {burn_tx}");
+    let other_burn_tx = holder.burn(1, 5, unlisted_asset)?;
+    eprintln!("burned 5 units of the unlisted asset on Zcash: {other_burn_tx}");
+
     // The registry, written after the fact: issuer 1 valid up to `last_in_range`.
     let genesis = node.block_hash(0)?;
     let reg = root.join("registry");
@@ -170,7 +182,23 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
     }
     let has = |ok: bool, needle: &str| report.lines.iter().any(|(o, l)| *o == ok && l.contains(needle));
     check(has(false, &format!("{}: metadata: bundle bytes do not hash", forged.dir)), "forged metadata is refused".into());
-    check(has(false, &format!("{}: supply 271 but valid issuances 100 - burned 0 differ", burn.dir)), "burn twin: supply 271, only 100 valid".into());
+    check(has(true, &format!("{}: burned on Zcash in tx {burn_tx}", burn.dir)), "the burn of 150 is counted for the burn twin".into());
+    check(
+        has(false, &format!("{}: 150 units burned on Zcash but only 100 validly issued", burn.dir)),
+        "burning more than was validly issued is flagged".into(),
+    );
+    check(
+        has(true, &format!("{}: node supply 121 = issued 271 - burned 150", burn.dir)),
+        "burn twin: node supply 121 = issued 271 - burned 150".into(),
+    );
+    check(
+        has(false, &format!("{}: supply 121 but valid issuances 100 - burned 150 differ", burn.dir)),
+        "burn twin: supply is not valid issuances minus burns".into(),
+    );
+    check(
+        has(true, "1 burn(s) of listed twins") && !report.lines.iter().any(|(_, l)| l.contains(&other_burn_tx)),
+        "the burn of an unlisted asset is not counted".into(),
+    );
     check(has(false, &format!("{}: FINALIZED", test.dir)), "test twin: finalized is a failure".into());
     check(has(true, "1 by other keys"), "the unlisted key's issuance is counted as someone else's".into());
     check(!report.passed(), "audit result is FAIL".into());
@@ -183,7 +211,8 @@ fn run_in(root: &Path, node_url: &str, node: &Node) -> Result<bool, String> {
         .filter(|(ok, l)| {
             !ok && !known.iter().any(|t| l.contains(t))
                 && !l.starts_with(&format!("{}: metadata", forged.dir))
-                && !l.contains("valid issuances 100 - burned 0 differ")
+                && !l.contains("supply 121 but valid issuances 100 - burned 150 differ")
+                && !l.contains("150 units burned on Zcash but only 100 validly issued")
                 && !l.contains(&format!("{}: supply 8 but valid issuances 0 - burned 0 differ", test.dir))
                 && !l.contains(&format!("{}: FINALIZED", test.dir))
         })
