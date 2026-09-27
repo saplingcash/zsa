@@ -9,6 +9,13 @@ Solana devnet. Test-network assets have no value.
 
 ## [Unreleased]
 
+### Changed
+
+- README: a quickstart from a clean Debian or Ubuntu machine to `zsa audit`. The Sapling proving
+  parameters are only needed to build issuances, not for `check`, `audit`, `inspect` or `pages`.
+- `check` on a burn twin with no `issuances.txt` says to run `audit` or to pass `--txid`, instead of
+  a bare file error.
+
 ### Tests
 
 - Unit tests for the threshold issuer that need no node: FROST signatures verify under the issuer key;

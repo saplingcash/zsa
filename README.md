@@ -8,6 +8,30 @@ one-way when its coin is burned on Solana. Anyone can check every issued unit fr
 > on QEDIT's public ZSA test network (or a local ZSA node) and on Solana devnet. Test-network assets
 > have **no value**. Never pay for them.
 
+## Quickstart
+
+From a clean Debian or Ubuntu machine (or WSL) to an audit of every published twin. It needs no key,
+no account and no proving parameters:
+
+```
+sudo apt-get update && sudo apt-get install -y build-essential pkg-config libssl-dev git curl
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && . "$HOME/.cargo/env"
+git clone https://github.com/saplingcash/zsa && cd zsa
+cargo build --release --locked
+./target/release/zsa audit
+```
+
+The first build compiles the Zcash crates and takes a few minutes; in a clean Ubuntu 24.04 container
+the whole sequence took under five. `audit` reads QEDIT's public ZSA test network and Solana devnet's
+public RPC, applies [docs/RULES.md](docs/RULES.md) to every twin, and ends with `RESULT: OK` when every
+rule holds. Then:
+
+```
+./target/release/zsa check assets/demo-coin-1   # one twin, step by step
+./target/release/zsa inspect <txid>             # what the chain shows about a transaction
+./target/release/zsa pages --out site           # the audit as HTML pages
+```
+
 ## What is here
 
 The `zsa` command-line tool:
@@ -44,15 +68,24 @@ The published twins are in `assets/`, and the listed issuer keys are in `registr
 
 ## Check it yourself
 
-You need Linux (or WSL), Rust, a C compiler and OpenSSL headers. You also need the Sapling proving
+You need Linux (or WSL), current stable Rust, a C compiler and OpenSSL headers (see
+[Quickstart](#quickstart)). `check`, `audit`, `inspect` and `pages` only read public data.
+
+Building issuances (`issue`, `serve`, and `holder send` / `burn`) also needs the Sapling proving
 parameters in `~/.zcash-params`: `sapling-spend.params` and `sapling-output.params` from
 https://download.z.cash/downloads/. Their SHA-256 values are in `.github/workflows/public-check.yml`.
+
+In WSL with the checkout on a Windows drive, `sh scripts/cargo-wsl.sh` runs cargo with its build
+output on the Linux filesystem, in `$HOME/zsa/target`:
 
 ```
 sh scripts/cargo-wsl.sh build --release --locked
 $HOME/zsa/target/release/zsa check assets/demo-coin-1
 $HOME/zsa/target/release/zsa audit
 ```
+
+`check` reads a twin's issuances from its `issuances.txt`. A burn twin has none (its issuances are
+found by scanning the chain), so use `audit` for it, or pass each txid with `--txid`.
 
 **`check`** prints one line per step:
 

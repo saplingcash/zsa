@@ -396,7 +396,15 @@ fn run(cli: Cli) -> Result<bool, String> {
         Cmd::Check { coin_dir, txid, node } => {
             let (envelope, bundle, issuer) = published(&coin_dir)?;
             let txids = if txid.is_empty() {
-                read_text(&coin_dir.join("issuances.txt"))?
+                let list = coin_dir.join("issuances.txt");
+                if !list.exists() {
+                    return Err(format!(
+                        "{} has no issuances.txt: a burn twin's issuances are found by scanning the chain. \
+                         Run `zsa audit` for all of them, or pass each txid with --txid",
+                        coin_dir.display()
+                    ));
+                }
+                read_text(&list)?
                     .lines()
                     .map(str::trim)
                     .filter(|l| !l.is_empty())
