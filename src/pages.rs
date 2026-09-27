@@ -59,7 +59,7 @@ fn page(title: &str, body: &str) -> String {
 const BANNER: &str = "<p class=\"banner\">Test networks only (Solana devnet and QEDIT's ZSA test network). No value. Never pay for it.</p>";
 
 const TRUST: &str = "<h2>Trust model</h2>\n<ul>\n\
-<li><strong>The issuer is trusted.</strong> It holds the issuance key, so it could issue without a burn, or refuse to issue.</li>\n\
+<li><strong>The issuer is trusted.</strong> Whoever can sign for the issuer key could issue without a burn, or refuse to issue: the holder of a single key, or a threshold of the signers of a FROST group key.</li>\n\
 <li><strong>Anyone can check.</strong> <code>zsa audit</code> recomputes everything on this page from the two chains and the published metadata, with no key and no account.</li>\n\
 <li><strong>Issuance is public</strong> (ZIP 227): the first recipient address and the amount are visible on Zcash. Once the holder sends the twin on to a fresh address, the asset, the amount and the parties are shielded.</li>\n\
 <li><strong>Burns on Zcash are public</strong> (ZIP 226): the asset and the amount, not who burned.</li>\n\

@@ -139,7 +139,9 @@ each signer checks, and the limits of this setup, are in [RULES.md §6](docs/RUL
 
 **A page per twin:** `zsa pages --out site` writes `site/index.html` and one page per twin: the asset,
 its supply, every issuance with the Solana burn behind it, every burn on Zcash, the audit result, the
-published metadata and the trust model.
+published metadata and the trust model. The pages are published at https://saplingcash.github.io/zsa/:
+`.github/workflows/pages.yml` runs the audit and regenerates them on every change to `main` and once a
+day.
 
 **Test vectors.** These run against a local ZSA node: QEDIT's Zebra in Docker (rootless works),
 regtest with ZSA active from height 1, RPC on `127.0.0.1:38232` only, and a fresh chain on every start.
