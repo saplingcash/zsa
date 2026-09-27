@@ -352,3 +352,130 @@ pub fn request_signature(
     }
     frost::aggregate(&package, &shares, pkp, false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("zsa-{name}-{}", hex::encode(rand::random::<[u8; 8]>())));
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// A signer holding `key`, with no twins, and a node these tests never contact.
+    fn signer(key: KeyPackage) -> Signer {
+        Signer {
+            key,
+            issuer: String::new(),
+            node: Node::new("http://127.0.0.1:9"),
+            twins: HashMap::new(),
+            valid_from: 1,
+            scanned_to: 0,
+            answered: HashSet::new(),
+            sessions: HashMap::new(),
+        }
+    }
+
+    fn sign_req(session: &str, package: &frost::SigningPackage) -> Value {
+        json!({"op": "sign", "session": session, "package": hex::encode(package.serialize().unwrap())})
+    }
+
+    fn error(v: &Value) -> &str {
+        assert_eq!(v.get("ok"), Some(&json!(false)), "{v}");
+        v.get("error").and_then(Value::as_str).unwrap_or("")
+    }
+
+    #[test]
+    fn dkg_between_three_participants_through_a_directory() {
+        let dir = temp_dir("dkg");
+        let handles: Vec<_> = (1..=3u16)
+            .map(|id| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    dkg(id, 3, 2, &dir.join("exchange"), &dir.join(format!("share-{id}")), &dir.join(format!("group-{id}")))
+                })
+            })
+            .collect();
+        let issuers: Vec<String> = handles.into_iter().map(|h| h.join().unwrap().unwrap()).collect();
+        assert!(issuers.iter().all(|i| *i == issuers[0]), "{issuers:?}");
+        assert_eq!(issuers[0].len(), 66);
+
+        let group = fs::read(dir.join("group-1")).unwrap();
+        let pkp = read_group(&dir.join("group-1")).unwrap();
+        for id in 1..=3u16 {
+            assert_eq!(fs::read(dir.join(format!("group-{id}"))).unwrap(), group);
+            let key = read_share(&dir.join(format!("share-{id}"))).unwrap();
+            assert_eq!(key.verifying_key(), pkp.verifying_key());
+            assert_eq!(*key.identifier(), frost::identifier(id).unwrap());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: PathBuf| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            for id in 1..=3u16 {
+                assert_eq!(mode(dir.join(format!("share-{id}"))), 0o600, "share {id}");
+            }
+            for entry in fs::read_dir(dir.join("exchange/round2")).unwrap() {
+                assert_eq!(mode(entry.unwrap().path()), 0o600, "round-2 package");
+            }
+        }
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_signer_signs_only_the_checked_sighash_and_only_once() {
+        let (keys, pkp) = frost::dkg_in_process(3, 2).unwrap();
+        let (id1, id2) = (frost::identifier(1).unwrap(), frost::identifier(2).unwrap());
+        let mut s1 = signer(keys[&id1].clone());
+        let sighash = [7u8; 32];
+
+        // Signer 1 has agreed to a session for `sighash` (its checks passed); signer 2 signs in process.
+        let (nonces1, commitments1) = frost::commit(&keys[&id1]);
+        s1.sessions.insert("s".into(), (Instant::now(), sighash, nonces1));
+        let (nonces2, commitments2) = frost::commit(&keys[&id2]);
+        let commitments = BTreeMap::from([(id1, commitments1), (id2, commitments2.clone())]);
+
+        // A package for another message is refused, and the session (with its nonces) is dropped.
+        let other = frost::signing_package(commitments.clone(), &[8u8; 32]);
+        assert!(error(&s1.handle(&sign_req("s", &other))).contains("not the checked transaction's sighash"));
+        let package = frost::signing_package(commitments, &sighash);
+        assert_eq!(error(&s1.handle(&sign_req("s", &package))), "unknown or expired session");
+
+        // A new session: the right package gets a share, and the shares aggregate to a valid signature.
+        let (nonces1, commitments1) = frost::commit(&keys[&id1]);
+        s1.sessions.insert("t".into(), (Instant::now(), sighash, nonces1));
+        let package = frost::signing_package(BTreeMap::from([(id1, commitments1), (id2, commitments2)]), &sighash);
+        let resp = s1.handle(&sign_req("t", &package));
+        let share1 = resp.get("share").and_then(Value::as_str).and_then(|h| hex::decode(h).ok()).expect("a share");
+        let share1 = frost::SignatureShare::deserialize(&share1).unwrap();
+        let share2 = frost::sign_share(&package, &nonces2, &keys[&id2], false).unwrap();
+        let sig = frost::aggregate(&package, &BTreeMap::from([(id1, share1), (id2, share2)]), &pkp, false).unwrap();
+        let ik = crate::threshold::issuer_from_xonly(&frost::group_xonly(&pkp).unwrap()).unwrap();
+        let mut enc = vec![0u8];
+        enc.extend_from_slice(&sig);
+        let sig = orchard::issuance::auth::IssueAuthSig::<orchard::issuance::auth::ZSASchnorr>::decode(&enc).unwrap();
+        assert!(ik.verify(&sighash, &sig).is_ok());
+
+        // Nonces are used once: the same session cannot sign again.
+        assert_eq!(error(&s1.handle(&sign_req("t", &package))), "unknown or expired session");
+    }
+
+    #[test]
+    fn expired_sessions_and_bad_requests_are_refused() {
+        let (keys, _) = frost::dkg_in_process(3, 2).unwrap();
+        let id1 = frost::identifier(1).unwrap();
+        let mut s1 = signer(keys[&id1].clone());
+        let (nonces, commitments) = frost::commit(&keys[&id1]);
+        let old = Instant::now().checked_sub(Duration::from_secs(301)).expect("uptime over five minutes");
+        s1.sessions.insert("old".into(), (old, [7u8; 32], nonces));
+        let package = frost::signing_package(BTreeMap::from([(id1, commitments)]), &[7u8; 32]);
+        assert_eq!(error(&s1.handle(&sign_req("old", &package))), "unknown or expired session");
+
+        assert_eq!(error(&s1.handle(&json!({"op": "sign", "session": "none", "package": "00"}))), "unknown or expired session");
+        assert_eq!(error(&s1.handle(&json!({"op": "commit", "session": "x", "tx": "not hex"}))), "tx is not hex");
+        assert!(error(&s1.handle(&json!({"op": "commit", "session": "x", "tx": "00"}))).starts_with("tx does not parse"));
+        assert_eq!(error(&s1.handle(&json!({"op": "delete"}))), "unknown op");
+        assert!(s1.sessions.is_empty());
+    }
+}

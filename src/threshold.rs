@@ -219,3 +219,90 @@ pub fn verify_issuance_signature(tx: &Transaction) -> Result<(), String> {
         .verify(tx.txid().as_ref(), b.authorization().signature().sig())
         .map_err(|_| "the issuance signature does not verify under the issuer key".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use rand::RngCore;
+
+    use super::*;
+    use crate::frost;
+
+    fn message() -> [u8; 32] {
+        let mut m = [0u8; 32];
+        OsRng.fill_bytes(&mut m);
+        m
+    }
+
+    /// Verify a 64-byte signature under `ik` the same way the issuance check does.
+    fn verifies(ik: &IssueValidatingKey<ZSASchnorr>, msg: &[u8; 32], sig64: &[u8]) -> bool {
+        let sig = issue_sig(sig64).expect("64 bytes");
+        ik.verify(msg, sig.sig()).is_ok()
+    }
+
+    #[test]
+    fn the_issuer_is_zero_byte_then_the_x_only_group_key() {
+        let (_, pkp) = frost::dkg_in_process(3, 2).unwrap();
+        let xonly = frost::group_xonly(&pkp).unwrap();
+        let enc = issuer_from_xonly(&xonly).unwrap().encode();
+        assert_eq!(enc.len(), 33);
+        assert_eq!(enc[0], 0x00);
+        assert_eq!(&enc[1..], &xonly[..]);
+    }
+
+    #[test]
+    fn every_two_of_three_signers_sign_for_the_issuer_key() {
+        let (keys, pkp) = frost::dkg_in_process(3, 2).unwrap();
+        let ik = issuer_from_xonly(&frost::group_xonly(&pkp).unwrap()).unwrap();
+        let ids: Vec<_> = (1..=3).map(|i| frost::identifier(i).unwrap()).collect();
+        for pair in [[0, 1], [0, 2], [1, 2]] {
+            let msg = message();
+            let signers = [ids[pair[0]], ids[pair[1]]];
+            let sig = frost::sign_in_process(&keys, &signers, &pkp, &msg, false).unwrap();
+            assert_eq!(sig.len(), 64);
+            assert!(verifies(&ik, &msg, &sig), "signers {pair:?}");
+        }
+        let msg = message();
+        let sig = frost::sign_in_process(&keys, &ids, &pkp, &msg, false).unwrap();
+        assert!(verifies(&ik, &msg, &sig), "all three");
+    }
+
+    #[test]
+    fn signatures_that_must_not_verify() {
+        let (keys, pkp) = frost::dkg_in_process(3, 2).unwrap();
+        let (other_keys, other_pkp) = frost::dkg_in_process(3, 2).unwrap();
+        let ik = issuer_from_xonly(&frost::group_xonly(&pkp).unwrap()).unwrap();
+        let ids: Vec<_> = (1..=3).map(|i| frost::identifier(i).unwrap()).collect();
+        let msg = message();
+
+        // A Taproot-tweaked (BIP-341) signature is valid for the tweaked key, not for `ik`.
+        let tweaked = frost::sign_in_process(&keys, &ids[..2], &pkp, &msg, true).unwrap();
+        assert!(!verifies(&ik, &msg, &tweaked), "tweaked");
+
+        // A 2-of-3 signature by another group.
+        let foreign = frost::sign_in_process(&other_keys, &ids[1..], &other_pkp, &msg, false).unwrap();
+        assert!(!verifies(&ik, &msg, &foreign), "another group");
+
+        // A valid signature, checked against another message.
+        let sig = frost::sign_in_process(&keys, &ids[..2], &pkp, &msg, false).unwrap();
+        assert!(verifies(&ik, &msg, &sig));
+        assert!(!verifies(&ik, &message(), &sig), "another message");
+
+        // One altered byte.
+        let mut altered = sig.clone();
+        altered[63] ^= 1;
+        assert!(!verifies(&ik, &msg, &altered), "altered");
+    }
+
+    #[test]
+    fn one_signer_alone_cannot_sign() {
+        let (keys, pkp) = frost::dkg_in_process(3, 2).unwrap();
+        let id = frost::identifier(2).unwrap();
+        assert!(frost::sign_in_process(&keys, &[id], &pkp, &message(), false).is_err());
+    }
+
+    #[test]
+    fn a_signature_has_64_bytes() {
+        assert!(issue_sig(&[0u8; 63]).is_err());
+        assert!(issue_sig(&[0u8; 65]).is_err());
+    }
+}

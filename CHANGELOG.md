@@ -9,6 +9,12 @@ Solana devnet. Test-network assets have no value.
 
 ## [Unreleased]
 
+### Tests
+
+- Unit tests for the threshold issuer that need no node: FROST signatures verify under the issuer key;
+  tweaked, foreign, altered and wrong-message signatures do not; one signer cannot sign; DKG through a
+  directory; a signer signs only the checked sighash, once, and drops expired sessions.
+
 ## [0.1.0]
 
 The first tagged version.
