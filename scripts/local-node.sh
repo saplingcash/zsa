@@ -1,15 +1,18 @@
 #!/bin/sh
-# A local ZSA node for tests: QEDIT's Zebra (branch zsa1, the commit zcash_tx_tool's CI tests
-# against) in Docker (rootless works), regtest with NU7/ZSA active from height 1, ephemeral state,
-# JSON-RPC published on 127.0.0.1 only.
+# A local ZSA node for tests: QEDIT's Zebra (branch zsa1) in Docker (rootless works), regtest with
+# NU7/ZSA active from height 1, ephemeral state, JSON-RPC published on 127.0.0.1 only.
 #
-# usage: sh scripts/local-node.sh build|start|stop|status
-#   ZSA_LOCAL_PORT   host port for the RPC (default 38232)
-#   ZSA_ZEBRA_SRC    where to clone QEDIT's Zebra (default $HOME/zsa/src/zebra)
+# The pinned commit is the head of zsa1 that advertises the NU7 protocol version and keeps Regtest
+# nodes running through NU7 activation. local-vectors and frost-selftest pass against it.
+#
+# usage: sh scripts/local-node.sh build|start|stop|status|version
+#   ZSA_LOCAL_PORT     host port for the RPC (default 38232)
+#   ZSA_ZEBRA_SRC      where to clone QEDIT's Zebra (default $HOME/zsa/src/zebra)
+#   ZSA_ZEBRA_COMMIT   another zsa1 commit to build and run instead of the pinned one
 set -eu
 
-ZEBRA_COMMIT=8c9c93fdd91b89fab387ec68362a93b2baca7bab
-IMAGE=zsa-zebra:8c9c93fd
+ZEBRA_COMMIT="${ZSA_ZEBRA_COMMIT:-05563cebde9fa0504876aae92ca6bbd1f62b5fac}"
+IMAGE="zsa-zebra:$(printf %.8s "$ZEBRA_COMMIT")"
 NAME=zsa-local-node
 PORT="${ZSA_LOCAL_PORT:-38232}"
 SRC="${ZSA_ZEBRA_SRC:-$HOME/zsa/src/zebra}"
@@ -43,8 +46,11 @@ case "${1:-}" in
   status)
     docker ps --filter "name=^$NAME\$" --format '{{.Names}} {{.Status}} {{.Ports}}'
     ;;
+  version)
+    printf '%s\n' "$(rpc getnetworkinfo | sed -n 's/.*"subversion":"\([^"]*\)".*"protocolversion":\([0-9]*\).*/\1 protocol \2/p')"
+    ;;
   *)
-    echo "usage: sh scripts/local-node.sh build|start|stop|status" >&2
+    echo "usage: sh scripts/local-node.sh build|start|stop|status|version" >&2
     exit 2
     ;;
 esac
