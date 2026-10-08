@@ -29,6 +29,11 @@ jobs:
           if [ -n "$DENYLIST" ]; then
             mkdir -p .private && printf '%s\n' "$DENYLIST" > .private/denylist.txt
           fi
+      - name: Use the base branch's guard (a PR must not weaken the checker that inspects it)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          git checkout "${{ github.event.pull_request.base.sha }}" -- scripts
       - name: Scan full history and tree
         # fails if the DENYLIST secret is missing; a merge commit by GitHub would fail the identity rule
         run: python scripts/public_check.py --history --require-denylist
